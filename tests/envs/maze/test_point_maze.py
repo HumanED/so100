@@ -1,9 +1,9 @@
 import gymnasium as gym
 import numpy as np
 
-import gymnasium_robotics
+import humaned_robotics
 
-gym.register_envs(gymnasium_robotics)
+gym.register_envs(humaned_robotics)
 
 
 def test_reset():

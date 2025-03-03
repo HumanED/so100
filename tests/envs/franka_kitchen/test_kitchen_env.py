@@ -3,13 +3,13 @@ from copy import deepcopy
 import gymnasium as gym
 import pytest
 
-import gymnasium_robotics
-from gymnasium_robotics.envs.franka_kitchen.kitchen_env import (
+import humaned_robotics
+from humaned_robotics.envs.franka_kitchen.kitchen_env import (
     OBS_ELEMENT_GOALS,
     OBS_ELEMENT_INDICES,
 )
 
-gym.register_envs(gymnasium_robotics)
+gym.register_envs(humaned_robotics)
 
 TASKS = ["microwave", "kettle"]
 

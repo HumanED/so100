@@ -9,8 +9,8 @@ from gymnasium.utils.env_checker import data_equivalence
 from gymnasium.utils.env_match import check_environments_match
 from pettingzoo.test import parallel_api_test
 
-import gymnasium_robotics.envs.multiagent_mujoco.many_segment_swimmer as many_segment_swimmer
-from gymnasium_robotics import mamujoco_v1
+import humaned_robotics.envs.multiagent_mujoco.many_segment_swimmer as many_segment_swimmer
+from humaned_robotics import mamujoco_v1
 
 scenario_conf = collections.namedtuple("scenario_conf", "scenario, conf, kwargs")
 
