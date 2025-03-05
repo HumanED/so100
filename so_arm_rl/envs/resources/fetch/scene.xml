@@ -1,0 +1,38 @@
+<mujoco model="so_arm100 scene">
+  <include file="so_arm100.xml"/>
+
+  <statistic center="0 -0.2 0.1" extent="0.4"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="140" elevation="-30"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+<!--    Cube and debug cube colours-->
+    <material name="target" rgba="0 1 0 0.2"/>
+    <material name="object" rgba="1 0 0 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+<!--    Cube -->
+    <body name="object" pos="0.3 -0.3 0.025">
+        <geom name="object" type="box" size="0.02 0.02 0.02" condim="4" density="567" material="object"></geom>
+        <site name="object:center" pos="0 0 0" rgba="1 0 0 0" size="0.01 0.01 0.01"></site>
+        <joint name="object:joint" type="free" damping="0.01"></joint>
+    </body>
+<!--    Debug cube-->
+    <body name="target" pos="-0.3 -0.2 0.025">
+          <geom name="target" type="box" size="0.02 0.02 0.02" condim="4" group="2" contype="0" conaffinity="0" material="target" ></geom>
+          <site name="target:center" pos="0 0 0" rgba="1 0 0 0" size="0.01 0.01 0.01"></site>
+          <joint name="target:joint" type="free" damping="0.01"></joint>
+    </body>
+  </worldbody>
+</mujoco>

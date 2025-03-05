@@ -8,7 +8,7 @@ from gymnasium.wrappers.transform_observation import TransformObservation
 import numpy as np
 import gymnasium
 
-from Shadow_Gym2.shadow_gym.envs.shadow_env_mujoco import ShadowEnvMujoco
+from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
 
 """
 Created by Ethan Cheam
@@ -23,9 +23,9 @@ old_model_file = "PPO-33b-shadowgym-ethan/48500000"
 
 # Run name should have model, unique number, and your name
 # PPO 34 is with ema
-this_run_name = "PPO-34-shadowgym-ethan"
+this_run_name = "PPO-0c-fetch-ethan"
 saving_timesteps_interval = 250_000
-start_saving = 1_000_000
+start_saving = 500_000
 # Seed sets random number generators in model and environment
 seed = 1
 
@@ -46,7 +46,7 @@ def make_env():
         """
         return np.clip(obs, a_min=obs.mean() - (5 * obs.std()), a_max=obs.mean() + (5 * obs.std()))
     # env = gymnasium.make("ShadowEnv-v1")
-    env = ShadowEnvMujoco()
+    env = SoFetchEnv()
     env = NormalizeObservation(env)
     env = TransformObservation(env, clip_observation, env.observation_space)
     env = Monitor(env)

@@ -1,0 +1,4 @@
+# https://gymnasium.farama.org/tutorials/gymnasium_basics/environment_creation/
+[project]
+name = "so_arm_rl"
+version = "0.0.1"
