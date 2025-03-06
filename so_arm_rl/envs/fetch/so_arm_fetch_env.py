@@ -66,6 +66,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.GOAL_MAX = [0.5, 0.5, 0.5]
         self.GOAL_MIN = [0.1, 0.1, 0.1]
         self.initial_cube_position = np.array([0.3, -0.3, 0.025])
+        self.grasp_reward = 20
+        self.target_reached_reward = 30
+
 
         N_ACTIONS = 6
         N_OBS = 31
@@ -81,7 +84,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.goal = np.zeros(0)
         self.total_timesteps = 0
         self.info = {
-            "success": 0,
+            "is_success": 0,
             "total_timesteps": 0,
             "dt": 0
         }
@@ -127,6 +130,13 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             "success": 0,
             "dt": dt,
             "total_timesteps": 0,
+            "grasp":0,
+            "rew_jaw_center_to_object":0,
+            "rew_object_to_target":0,
+            "rew_jaw_center_to_object_prop": 0,
+            "rew_object_to_target_prop": 0,
+            "reset_flag": True,
+            "rew_other": 0
         }
 
         # Return obs and info
@@ -183,6 +193,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         """
         if np.array(action).shape != self.action_space.shape:
             raise ValueError("Action dimension mismatch")
+        self.info["reset_flag"] = False
 
         self.total_timesteps += 1
         self.info["total_timesteps"] = self.total_timesteps
@@ -212,10 +223,37 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
     def _compute_reward(self, obs):
         # TODO: Try a 2 staged reward where reward for getting jaw to next to the cube then lessen the cube reward and add reward for cube to target
         # TODO: Try using previous distance - current distance maybe later
+        # TODO: Change logging to the composition of 0.75 etc of each
         """Reward function"""
-        # object_target_diff = obs[25:28]
         object_jaw_diff = obs[22:25]
-        return -np.linalg.norm(object_jaw_diff)
+        object_target_diff = obs[25:28]
+        reward = 0
+        rew_jaw_center_to_object = -np.linalg.norm(object_jaw_diff)
+        self.info["rew_jaw_center_to_object"] = rew_jaw_center_to_object
+        rew_object_to_target = -np.linalg.norm(object_target_diff)
+        self.info["rew_object_to_target"] = rew_object_to_target
+        self.info["rew_other"] = 0
+        # If not yet grasped the object
+        if (self.grasp_reward > 0):
+            # When grasped, immediate reward
+            if (abs(rew_jaw_center_to_object) < 0.004):
+                reward += self.grasp_reward
+                self.grasp_reward = 0
+                self.info["rew_other"] = self.grasp_reward
+            reward += (0.75 * rew_jaw_center_to_object) + (0.25 * rew_object_to_target)
+            self.info["rew_jaw_center_to_object_prop"] = (0.75 * rew_jaw_center_to_object)
+            self.info["rew_object_to_target_prop"] = (0.25 * rew_object_to_target)
+        else:
+            reward += (0.25 * rew_jaw_center_to_object) + (0.75 * rew_object_to_target)
+            self.info["rew_jaw_center_to_object_prop"] = (0.25 * rew_jaw_center_to_object)
+            self.info["rew_object_to_target_prop"] = (0.75 * rew_object_to_target)
+
+        if (abs(rew_object_to_target) < 0.002 and self.target_reached_reward > 0):
+            reward += self.target_reached_reward
+            self.info["is_success"] = 1
+            self.target_reached_reward = 0
+            self.info["rew_other"] += self.target_reached_reward
+        return reward
 
     def _apply_action(self, action: np.ndarray):
         """
@@ -262,8 +300,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
 
         # Position of the jaw (x,y,z)
-        # Changed to Fixed_Jaw since Fixed_Jaw does not move when jaw is opened/closed
-        jaw_pos = mujoco_utils.get_body_xpos(self.model, self.data, "Fixed_Jaw")
+        jaw_pos = mujoco_utils.get_site_xpos(self.model, self.data, "jaw_site")
 
         # Difference between Jaw and Cube position (dx, dy, dz)
         object_jaw_diff = object_qpos[:3] - jaw_pos

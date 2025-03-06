@@ -9,7 +9,7 @@ import time
 # SETTINGS
 # TODO: Record 0b as using the moving jaw
 # TODO: Record 0c as using the fixed jaw body
-model_folder_zip = "PPO-0c-fetch-ethan/6000000.zip"
+model_folder_zip = "PPO-0d-fetch-ethan/3500000.zip"
 
 
 def make_env():

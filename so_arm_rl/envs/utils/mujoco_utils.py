@@ -209,6 +209,10 @@ def extract_mj_names(
 
     return tuple(id2name[id] for id in sorted(name2id.values())), name2id, id2name
 
+def get_site_xpos(model, data, name):
+    site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)
+    assert site_id != -1, f"Site with name '{name}' is not part of the model!"
+    return data.site_xpos[site_id]
 
 class MujocoModelNames:
     """Access mjtObj object names and ids of the current MuJoCo model.
