@@ -183,6 +183,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
         Args:
             action (np.ndarray): Control action to be applied to the agent and update the simulation. Should be of shape :attr:`action_space`.
+            Should be [Rotation (base rotation), Pitch (base up-down), Elbow (up-down), Wrist_Pitch (up-down), Wrist_Rotation (rotation), Jaw (up down)]
+            by observing the motors in order from base of the robot to the jaw
 
         Returns:
             observation (np.ndarray): Next observation due to the agent actions

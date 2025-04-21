@@ -7,8 +7,6 @@ import os
 import time
 
 # SETTINGS
-# TODO: Record 0b as using the moving jaw
-# TODO: Record 0c as using the fixed jaw body
 model_folder_zip = "PPO-0d-fetch-ethan/3500000.zip"
 
 
@@ -43,6 +41,7 @@ def main():
         episode_reward = 0
         obs, info = env.reset()
         time_between_frames = info["dt"]
+
         # Each frame should have a gap of 80ms for the visualisation video to match real time. Each frame represents simulation moving by 80ms
         # The time.sleep delay ensures the simulation moves at same speed as if it were a real robot. info["dt"] should be 0.08
         previous_success = 0
