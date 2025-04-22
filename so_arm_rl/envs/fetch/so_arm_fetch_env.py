@@ -72,7 +72,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
         N_ACTIONS = 6
         N_OBS = 31
-        self.action_space = gymnasium.spaces.MultiDiscrete(nvec=[11] * N_ACTIONS)
+        self.N_DISCRETE = 64
+        self.action_space = gymnasium.spaces.MultiDiscrete(nvec=[self.N_DISCRETE] * N_ACTIONS)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(N_OBS,), dtype=np.float32)
 
         self.FULLPATH = os.path.join(os.path.dirname(__file__), "../resources", "fetch", "scene.xml")
@@ -202,7 +203,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
         # Rescale the angle between -1 and 1 for _apply_action(). See action space of https://robotics.farama.org/envs/shadow_dexterous_hand/manipulate_block/
         # See second min-max normalization formula https://en.wikipedia.org/wiki/Feature_scaling
-        action = -1 + (action * 2) / 10
+        action = -1 + (action * 2) / (self.N_DISCRETE - 1)
         if self.EMA != None:
             action = self.EMA.update(action)
         self._apply_action(action)

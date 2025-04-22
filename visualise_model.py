@@ -7,7 +7,8 @@ import os
 import time
 
 # SETTINGS
-model_folder_zip = "PPO-0d-fetch-ethan/3500000.zip"
+model_folder_zip = "PPO-1-fetch-ethan/13750000.zip"
+extra_delay = 0 # seconds
 
 
 def make_env():
@@ -54,7 +55,7 @@ def main():
             obs, reward, terminated, truncated, info = env.step(action)
             time_to_process = time.time() - start_time
             episode_reward += reward
-            delay_time = time_between_frames - time_to_process
+            delay_time = time_between_frames - time_to_process + extra_delay
             if (delay_time > 0):
                 time.sleep(delay_time)  # proper time
 

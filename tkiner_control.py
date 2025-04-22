@@ -25,7 +25,7 @@ def make_env():
 
 
 def main():
-    MAX_ACTION = 10
+    MAX_ACTION = 49 # Set to N_DISCRETE - 1
     # These are not exact text in .xml files
     SLIDER_LABELS = ["Base Rotation", "Pitch", "Elbow Pitch","Wrist Pitch", "Wrist Rotation","Jaw"]
     root = tk.Tk()
@@ -45,7 +45,7 @@ def main():
     ) for label in SLIDER_LABELS]
 
     for slider in sliders:
-        slider.set(5)
+        slider.set(int(MAX_ACTION / 2))
         slider.pack()
     obs_label = tk.Label(root, text=f"Default Text", font=('Consolas', 14))
     obs_label.pack(side=tk.LEFT, padx=10)
