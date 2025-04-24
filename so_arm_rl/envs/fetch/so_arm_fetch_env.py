@@ -65,7 +65,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.FIXED_GOAL = [-0.3, -0.2, 0.025]
         self.GOAL_MAX = [0.5, 0.5, 0.5]
         self.GOAL_MIN = [0.1, 0.1, 0.1]
-        self.initial_cube_position = np.array([0.3, -0.3, 0.025])
+        self.initial_cube_position = np.array([0.25, -0.25, 0.025])
         self.grasp_reward = 20
         self.target_reached_reward = 30
 
@@ -239,10 +239,10 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # If not yet grasped the object
         if (self.grasp_reward > 0):
             # When grasped, immediate reward
-            if (abs(rew_jaw_center_to_object) < 0.004):
+            if (abs(rew_jaw_center_to_object) < 0.032):
                 reward += self.grasp_reward
-                self.grasp_reward = 0
                 self.info["rew_other"] = self.grasp_reward
+                self.grasp_reward = 0
             reward += (0.75 * rew_jaw_center_to_object) + (0.25 * rew_object_to_target)
             self.info["rew_jaw_center_to_object_prop"] = (0.75 * rew_jaw_center_to_object)
             self.info["rew_object_to_target_prop"] = (0.25 * rew_object_to_target)
