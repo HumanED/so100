@@ -7,8 +7,8 @@ import os
 import time
 
 # SETTINGS
-model_folder_zip = "PPO-2-fetch-ethan/7750000.zip"
-extra_delay = 0 # seconds
+model_folder_zip = "PPO-1-fetch-ethan/13750000.zip"
+extra_delay = 1 # seconds
 
 
 def make_env():
