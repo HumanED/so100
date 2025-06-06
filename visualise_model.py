@@ -7,11 +7,11 @@ import os
 import time
 
 # SETTINGS
-model_folder_zip = "PPO-2b-fetch-ethan/10250000.zip"
+model_folder_zip = "PPO-2b-fetch-ethan/8000000.zip"
 extra_delay = 0 # seconds
 
 
-def make_env():
+def make_env_and_get_dt():
     """Creates gymnasium environment for visualisation with necessary wrappers"""
 
     def clip_observation(obs):
@@ -23,16 +23,18 @@ def make_env():
 
     # env = gymnasium.make("ShadowEnv-v1")
     env = SoFetchEnv(render_mode="human")
+    # dt is number of seconds between each frame
+    dt = env.N_SUBSTEPS * env.model.opt.timestep
     env = NormalizeObservation(env)
     env = TransformObservation(env, clip_observation, env.observation_space)
-    return env
+    return env, dt
 
 
 def main():
     model_path = os.path.join(os.path.dirname(__file__), "models", model_folder_zip)
     if not os.path.exists(model_path):
         raise Exception("Error: model not found")
-    env = make_env()
+    env, dt = make_env_and_get_dt()
     model = PPO.load(model_path, env=env)
 
 
@@ -41,7 +43,7 @@ def main():
         truncated = False
         episode_reward = 0
         obs, info = env.reset()
-        time_between_frames = info["dt"]
+        time_between_frames = dt
 
         # Each frame should have a gap of 80ms for the visualisation video to match real time. Each frame represents simulation moving by 80ms
         # The time.sleep delay ensures the simulation moves at same speed as if it were a real robot. info["dt"] should be 0.08

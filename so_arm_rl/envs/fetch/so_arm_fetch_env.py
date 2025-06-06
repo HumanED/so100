@@ -66,7 +66,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.GOAL_MAX = [0.5, 0.5, 0.5]
         self.GOAL_MIN = [0.1, 0.1, 0.1]
         self.initial_cube_position = np.array([0.25, -0.25, 0.025])
-        self.grasp_reward = 20
+        self.FIXED_GRASP_REWARD = 20
+        self.grasp_reward = self.FIXED_GRASP_REWARD
         self.target_reached_reward = 30
 
 
@@ -87,7 +88,6 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.info = {
             "is_success": 0,
             "total_timesteps": 0,
-            "dt": 0
         }
         self.render_mode = render_mode
         self.mujoco_renderer = MujocoRenderer(
@@ -97,7 +97,6 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         )
 
     def _load_mujoco_robot(self):
-        # TODO: Done
         """
         Loads XML file containing all information about the cube and hand. Runs only once when gymnasium.make() is called
         """
@@ -113,23 +112,23 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             seed: Optional[int] = None,
             options: Optional[dict] = None,
     ):
-        # TODO: Done
         """
         Reset the environment, counters, self.info, position of cube and hand, and goal
         """
         # Reset environment state
         super().reset(seed=seed)
         self.total_timesteps = 0
-        # Time between each frame in rendering
-        dt = self.model.opt.timestep * self.N_SUBSTEPS
+
         self._reset_sim()
 
         # Compute initial goal
         self.goal = self._compute_goal()
 
+        # Reset the once-per episode grasp_reward
+        self.grasp_reward = self.FIXED_GRASP_REWARD
+
         self.info = {
-            "success": 0,
-            "dt": dt,
+            "is_success": 0,
             "total_timesteps": 0,
             "grasp":0,
             "rew_jaw_center_to_object":0,
@@ -147,7 +146,6 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         return obs, self.info
 
     def _compute_goal(self) -> np.ndarray:
-        # TODO: Done
         """Returns goal position [x,y,z]"""
         if self.FIXED_GOAL:
             new_goal = np.array(self.FIXED_GOAL.copy())
@@ -239,7 +237,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # If not yet grasped the object
         if (self.grasp_reward > 0):
             # When grasped, immediate reward
-            if (abs(rew_jaw_center_to_object) < 0.032):
+            if (abs(rew_jaw_center_to_object) < 0.05):
                 reward += self.grasp_reward
                 self.info["rew_other"] = self.grasp_reward
                 self.grasp_reward = 0
