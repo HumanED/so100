@@ -22,7 +22,7 @@ old_model_file = "PPO-1-fetch-ethan/3000000"
 # Set old_model_file="PPO-21-shadowgym-ethan" and this_run_name="PPO-20-shadowgym-ethan"
 
 # Run name should have model, unique number, and your name
-this_run_name = "PPO-2b-fetch-ethan"
+this_run_name = "PPO-3-fetch-ethan"
 saving_timesteps_interval = 250_000
 start_saving = 500_000
 # Seed sets random number generators in model and environment
