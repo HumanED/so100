@@ -1,56 +1,39 @@
 import os
 
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.monitor import Monitor
-from gymnasium.wrappers import NormalizeObservation
-from gymnasium.wrappers.transform_observation import TransformObservation
 import numpy as np
-import gymnasium
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize, DummyVecEnv, VecMonitor
 
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
-from stable_baselines3.common.callbacks import BaseCallback
+
 """
 Created by Ethan Cheam
 """
 
 # SETTINGS
 vectorized_env = True  # Set to True to use multiple environments
-start_from_existing = False
-old_model_file = "PPO-1-fetch-ethan/3000000"
+start_from_existing = True
+old_model_file = "PPO-4-fetch-ethan/4750000"
 # When you want to train PPO-20-shadowgym-ethan more and create PPO-21-shadowgym-ethan
 # Set old_model_file="PPO-21-shadowgym-ethan" and this_run_name="PPO-20-shadowgym-ethan"
 
 # Run name should have model, unique number, and your name
-this_run_name = "PPO-3-fetch-ethan"
-saving_timesteps_interval = 250_000
-start_saving = 500_000
+this_run_name = "PPO-4b-fetch-ethan"
+saving_timesteps_interval = 500_000
+start_saving = 1_000_000
 # Seed sets random number generators in model and environment
 seed = 1
 
-# Set up folders to store models and logs
-models_dir = os.path.join(os.path.dirname(__file__), 'models')
-logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
-if not start_from_existing and os.path.exists(f"{models_dir}/{this_run_name}"):
-    raise Exception("Error: model folder already exists. Change run_name to prevent overriding existing model folder")
-if not start_from_existing and os.path.exists(f"{logs_dir}/{this_run_name}"):
-    raise Exception("Error: log folder already exists. Change run_name to prevent overriding existing log folder")
 
-def make_env():
+def make_env(rank, seed):
     """Creates gymnasium environment with necessary wrappers"""
-    def clip_observation(obs):
-        """
-        clips observation to within 5 standard deviations of the mean
-        Refer to section D.1 of Open AI paper
-        """
-        return np.clip(obs, a_min=obs.mean() - (5 * obs.std()), a_max=obs.mean() + (5 * obs.std()))
-    # env = gymnasium.make("ShadowEnv-v1")
-    env = SoFetchEnv()
-    env = NormalizeObservation(env)
-    env = TransformObservation(env, clip_observation, env.observation_space)
-    env = Monitor(env)
-    env.reset(seed=seed)
-    return env
+    def inner():
+        env = SoFetchEnv()
+        # Ensure each environment has a different seed
+        env.reset(seed=rank + seed)
+        return env
+    return inner
 
 class TensorboardCallback(BaseCallback):
     def __init__(self, verbose=0):
@@ -72,7 +55,7 @@ class TensorboardCallback(BaseCallback):
     def _on_step(self) -> bool:
         # Warning!: In vectorized environments, on last step(), the reset() is called before _on_step
         # https://stable-baselines3.readthedocs.io/en/master/guide/vec_envs.html
-        # This code records rewards for the
+        # This code records each type of reward generated at each step.
         info = self.training_env.get_attr("info")[0]
 
         if info["reset_flag"] and not self.ignore_reset_flag:
@@ -107,22 +90,32 @@ class TensorboardCallback(BaseCallback):
             self.sub_rews_cumul[k] = 0
 
 def main():
-    print(logs_dir)
     if vectorized_env:
         num_envs = os.cpu_count() # Number of parallel environments. Equal to number of CPU cores
         print(f"Running on {num_envs} cores")
-        env = SubprocVecEnv([make_env for _ in range(num_envs)])
+        vec_env = SubprocVecEnv([make_env(i, seed) for i in range(num_envs)])
     else:
-        env = make_env()
+        vec_env = DummyVecEnv([make_env(0, seed)])
 
+    vec_env = VecMonitor(vec_env, filename=None)
 
 
     # Load existing model or create a new model
     if start_from_existing:
-
-        model = PPO.load(os.path.join(models_dir, old_model_file), env, seed=seed, tensorboard_log=os.path.normpath(logs_dir))
+        vec_env = VecNormalize.load(os.path.join(vec_stats_dir, old_model_file + ".pkl"), vec_env)
+        vec_env.training = True
+        vec_env.norm_reward = True
+        model = PPO.load(os.path.join(models_dir, old_model_file), vec_env, seed=seed, tensorboard_log=os.path.normpath(logs_dir))
     else:
-        model = PPO(policy="MlpPolicy", env=env, tensorboard_log=os.path.normpath(logs_dir), verbose=1)
+        # Normalize observation and rewards.
+        # VecNormalize computes a RunningMeanStd (mean, std number) for observations and a RunningMeanStd for rewards
+        # Uses the mean and std for z-normalisation. norm_obs_i = (raw_obs_i - mean_obs_i) / std_obs_i
+        # i means the i-th dimension of the observation. Also means i-th value of the obs ndarray.
+        vec_env = VecNormalize(vec_env,
+                               norm_obs=True,
+                               norm_reward=True,
+                               clip_obs=10.0)
+        model = PPO(policy="MlpPolicy", env=vec_env, tensorboard_log=os.path.normpath(logs_dir), verbose=2)
 
     # Training loop
     timesteps = 0
@@ -131,7 +124,23 @@ def main():
         timesteps += saving_timesteps_interval
         if timesteps >= start_saving:
             model.save(os.path.join(models_dir, this_run_name, str(timesteps)))
+            vec_env.save(os.path.join("vec_norm_stats", this_run_name, str(timesteps) + ".pkl"))
 
 
 if __name__ == "__main__":
+    # Set up folders to store models and logs
+    models_dir = os.path.join(os.path.dirname(__file__), 'models')
+    logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+    if not start_from_existing and os.path.exists(f"{models_dir}/{this_run_name}"):
+        raise Exception(
+            "Error: model folder already exists. Change run_name to prevent overriding existing model folder")
+    if not start_from_existing and os.path.exists(f"{logs_dir}/{this_run_name}"):
+        raise Exception("Error: log folder already exists. Change run_name to prevent overriding existing log folder")
+
+    vec_stats_dir = os.path.join(os.path.dirname(__file__), 'vec_norm_stats')
+    if (not start_from_existing) and os.path.exists(f"{vec_stats_dir}/{this_run_name}"):
+        raise Exception(
+            "Error: vec_stats folder already exists. Change run_name to prevent overriding existing vec_stats folder")
+    os.mkdir(os.path.join(models_dir, this_run_name))
+    os.mkdir(os.path.join(vec_stats_dir, this_run_name))
     main()

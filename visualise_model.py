@@ -1,5 +1,6 @@
 from stable_baselines3 import PPO
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import numpy as np
 import gymnasium
 from gymnasium.wrappers import TransformObservation, NormalizeObservation
@@ -7,42 +8,45 @@ import os
 import time
 
 # SETTINGS
-model_folder_zip = "PPO-2b-fetch-ethan/8000000.zip"
+model_folder = "PPO-4b-fetch-ethan/9750000" # no .zip
 extra_delay = 0 # seconds
 
 
-def make_env_and_get_dt():
-    """Creates gymnasium environment for visualisation with necessary wrappers"""
+def make_env():
+    def inner():
+        env = SoFetchEnv(render_mode="human")
+        return env
+    return inner
 
-    def clip_observation(obs):
-        """
-        clips observation to within 5 standard deviations of the mean
-        Refer to section D.1 of Open AI paper
-        """
-        return np.clip(obs, a_min=obs.mean() - (5 * obs.std()), a_max=obs.mean() + (5 * obs.std()))
-
-    # env = gymnasium.make("ShadowEnv-v1")
-    env = SoFetchEnv(render_mode="human")
-    # dt is number of seconds between each frame
-    dt = env.N_SUBSTEPS * env.model.opt.timestep
-    env = NormalizeObservation(env)
-    env = TransformObservation(env, clip_observation, env.observation_space)
-    return env, dt
 
 
 def main():
-    model_path = os.path.join(os.path.dirname(__file__), "models", model_folder_zip)
+    model_path = os.path.join(os.path.dirname(__file__), "models", model_folder + ".zip")
     if not os.path.exists(model_path):
         raise Exception("Error: model not found")
-    env, dt = make_env_and_get_dt()
-    model = PPO.load(model_path, env=env)
+    vec_stats_path = os.path.join(os.path.dirname(__file__), "vec_norm_stats", model_folder + ".pkl")
+    if not os.path.exists(vec_stats_path):
+        raise Exception("Error: VecNormalize mean and std stats file not found")
+
+    # Load environment
+    vec_env = DummyVecEnv([make_env()])
+    vec_env = VecNormalize.load(vec_stats_path, vec_env)
+    vec_env.training = False
+    vec_env.norm_reward = False # Ensures fair comparison between different runs
+
+    # Load model
+    model = PPO.load(model_path, env=vec_env)
+
+    # Compute dt value
+    temp_env = SoFetchEnv()
+    dt = temp_env.N_SUBSTEPS * temp_env.model.opt.timestep
 
 
     while True:
         terminated = False
         truncated = False
         episode_reward = 0
-        obs, info = env.reset()
+        obs_vector = vec_env.reset()
         time_between_frames = dt
 
         # Each frame should have a gap of 80ms for the visualisation video to match real time. Each frame represents simulation moving by 80ms
@@ -51,10 +55,15 @@ def main():
 
         print("DEBUG INFO")
         # print(f"Target rotation {info['goal_rotation']}")
-        while not terminated and not truncated:
+
+        done = False
+
+        while not done:
             start_time = time.time()
-            action, _ = model.predict(obs)
-            obs, reward, terminated, truncated, info = env.step(action)
+            action_vector, _ = model.predict(obs_vector)
+            obs_vector, reward_vector, dones_vector, _ = vec_env.step(action_vector)
+            reward = reward_vector[0]
+            done = dones_vector[0]
             time_to_process = time.time() - start_time
             episode_reward += reward
             delay_time = time_between_frames - time_to_process + extra_delay
