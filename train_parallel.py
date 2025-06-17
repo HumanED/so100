@@ -13,13 +13,13 @@ Created by Ethan Cheam
 
 # SETTINGS
 vectorized_env = True  # Set to True to use multiple environments
-start_from_existing = True
+start_from_existing = False
 old_model_file = "PPO-4-fetch-ethan/4750000"
 # When you want to train PPO-20-shadowgym-ethan more and create PPO-21-shadowgym-ethan
 # Set old_model_file="PPO-21-shadowgym-ethan" and this_run_name="PPO-20-shadowgym-ethan"
 
 # Run name should have model, unique number, and your name
-this_run_name = "PPO-4b-fetch-ethan"
+this_run_name = "PPO-3c-fetch-ethan"
 saving_timesteps_interval = 500_000
 start_saving = 1_000_000
 # Seed sets random number generators in model and environment
@@ -88,8 +88,7 @@ class TensorboardCallback(BaseCallback):
         self.episode_count = 0
         for k in self.sub_rews_cumul.keys():
             self.sub_rews_cumul[k] = 0
-
-def main():
+def main(models_dir, vec_stats_dir, logs_dir):
     if vectorized_env:
         num_envs = os.cpu_count() # Number of parallel environments. Equal to number of CPU cores
         print(f"Running on {num_envs} cores")
@@ -124,7 +123,7 @@ def main():
         timesteps += saving_timesteps_interval
         if timesteps >= start_saving:
             model.save(os.path.join(models_dir, this_run_name, str(timesteps)))
-            vec_env.save(os.path.join("vec_norm_stats", this_run_name, str(timesteps) + ".pkl"))
+            vec_env.save(os.path.join(vec_stats_dir, this_run_name, str(timesteps) + ".pkl"))
 
 
 if __name__ == "__main__":
@@ -143,4 +142,4 @@ if __name__ == "__main__":
             "Error: vec_stats folder already exists. Change run_name to prevent overriding existing vec_stats folder")
     os.mkdir(os.path.join(models_dir, this_run_name))
     os.mkdir(os.path.join(vec_stats_dir, this_run_name))
-    main()
+    main(models_dir, vec_stats_dir, logs_dir)
