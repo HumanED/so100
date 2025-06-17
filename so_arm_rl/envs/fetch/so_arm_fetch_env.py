@@ -229,9 +229,10 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         object_target_diff = obs[25:28]
         reward = 0
         rew_jaw_center_to_object = -np.linalg.norm(object_jaw_diff)
-        self.info["rew_jaw_center_to_object"] += rew_jaw_center_to_object
+        self.info["rew_jaw_center_to_object"] = rew_jaw_center_to_object
         rew_object_to_target = -np.linalg.norm(object_target_diff)
-        self.info["rew_object_to_target"] += rew_object_to_target
+        self.info["rew_object_to_target"] = rew_object_to_target
+        self.info["rew_other"] = 0
 
         # If not yet grasped the object
         if (self.grasp_reward > 0):
@@ -241,12 +242,12 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
                 self.info["rew_other"] = self.grasp_reward
                 self.grasp_reward = 0
             reward += (0.75 * rew_jaw_center_to_object) + (0.25 * rew_object_to_target)
-            self.info["rew_jaw_center_to_object_prop"] += (0.75 * rew_jaw_center_to_object)
-            self.info["rew_object_to_target_prop"] += (0.25 * rew_object_to_target)
+            self.info["rew_jaw_center_to_object_prop"] = (0.75 * rew_jaw_center_to_object)
+            self.info["rew_object_to_target_prop"] = (0.25 * rew_object_to_target)
         else:
             reward += (0.25 * rew_jaw_center_to_object) + (0.75 * rew_object_to_target)
-            self.info["rew_jaw_center_to_object_prop"] += (0.25 * rew_jaw_center_to_object)
-            self.info["rew_object_to_target_prop"] += (0.75 * rew_object_to_target)
+            self.info["rew_jaw_center_to_object_prop"] = (0.25 * rew_jaw_center_to_object)
+            self.info["rew_object_to_target_prop"] = (0.75 * rew_object_to_target)
 
         if (abs(rew_object_to_target) < 0.02 and self.target_reached_reward > 0):
             reward += self.target_reached_reward
