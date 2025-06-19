@@ -63,7 +63,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.RELATIVE_CONTROL = False
         self.N_SUBSTEPS = 20
         self.EMA = None
-        self.FIXED_GOAL = [-0.3, -0.2, 0.025]
+        self.FIXED_GOAL = [-0.2, -0.25, 0.1]
         self.GOAL_MAX = [0.5, 0.5, 0.5]
         self.GOAL_MIN = [0.1, 0.1, 0.1]
         self.initial_cube_position = np.array([0.25, -0.25, 0.025])
