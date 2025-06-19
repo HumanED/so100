@@ -15,6 +15,18 @@ def make_env():
     return env
 
 
+class Statistic:
+    def __init__(self):
+        self.grasped_reward_issued = None
+        self.target_reward_issued = None
+        self.total_episode_reward = None
+        self.reset()
+
+    def reset(self):
+        self.total_episode_reward = 0
+        self.grasped_reward_issued = False
+        self.target_reward_issued = False
+
 
 def main():
     MAX_ACTION = 63 # Set to N_DISCRETE - 1
@@ -25,6 +37,7 @@ def main():
     root.title("MuJoco Simulation Control")
     env = make_env()
     env.reset()
+    stat = Statistic()
     sliders = [tk.Scale(
         root,
         from_= 0,
@@ -42,11 +55,13 @@ def main():
     obs_label = tk.Label(root, text=f"Default Text", font=('Consolas', 14))
     obs_label.pack(padx=10)
 
+
     def on_reset():
         env.reset()
         for slider in sliders:
             slider.set(int(MAX_ACTION / 2))
         obs_label.config(text="Environment reset")
+        stat.reset()
 
     reset_button = tk.Button(root, text="Reset", command=on_reset, font=('Consolas',16,'normal') )
     reset_button.pack()
@@ -56,11 +71,19 @@ def main():
         action = np.array(user_input)
         # print(action)
         obs, rew, terminated, truncated, info = env.step(action)
+        stat.total_episode_reward += rew
         label_text = ""
         for k,v in info.items():
-            label_text = label_text + f"{k}:{v:.3f}\n"
-        if info["rew_other"] > 0:
+            label_text += f"{k}:{v:.3f}\n"
+        label_text += f"total_episode_rew {stat.total_episode_reward:.3f}\n"
+        label_text += f"grasp_reward_issued {stat.grasped_reward_issued}\n"
+        label_text += f"target_reward_issued {stat.target_reward_issued}\n"
+        if info["rew_other"] == env.FIXED_GRASP_REWARD:
             print("Successful grasp")
+            stat.grasped_reward_issued = True
+        if info["rew_other"] == env.FIXED_TARGET_REACHED_REWARD:
+            print("Goal achieved")
+            stat.target_reward_issued = True
         obs_label.config(text=f"Info: {label_text}")
         # Calls the step_env every 40 milliseconds.
         root.after(40, step_env)
