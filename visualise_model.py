@@ -8,6 +8,7 @@ from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
 
 # SETTINGS
 model_folder = "PPO-7-fetch-ethan/9000000"  # no .zip
+
 extra_delay = 0  # seconds
 
 
