@@ -8,19 +8,10 @@ import tkinter as tk
 import sys
 
 def make_env():
-    """Creates gymnasium environment for visualisation with necessary wrappers"""
-
-    def clip_observation(obs):
-        """
-        clips observation to within 5 standard deviations of the mean
-        Refer to section D.1 of Open AI paper
-        """
-        return np.clip(obs, a_min=obs.mean() - (5 * obs.std()), a_max=obs.mean() + (5 * obs.std()))
+    """Creates gymnasium environment for visualisation"""
 
     # env = gymnasium.make("ShadowEnv-v1")
     env = SoFetchEnv(render_mode="human")
-    env = NormalizeObservation(env)
-    env = TransformObservation(env, clip_observation, env.observation_space)
     return env
 
 
@@ -49,7 +40,16 @@ def main():
         slider.set(int(MAX_ACTION / 2))
         slider.pack()
     obs_label = tk.Label(root, text=f"Default Text", font=('Consolas', 14))
-    obs_label.pack(side=tk.LEFT, padx=10)
+    obs_label.pack(padx=10)
+
+    def on_reset():
+        env.reset()
+        for slider in sliders:
+            slider.set(int(MAX_ACTION / 2))
+        obs_label.config(text="Environment reset")
+
+    reset_button = tk.Button(root, text="Reset", command=on_reset, font=('Consolas',16,'normal') )
+    reset_button.pack()
 
     def step_env():
         user_input = [slider.get() for slider in sliders]
