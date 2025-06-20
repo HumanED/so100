@@ -137,7 +137,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             "rew_jaw_center_to_object_prop": 0,
             "rew_object_to_target_prop": 0,
             "reset_flag": True,
-            "rew_other": 0,
+            # "rew_other": 0,
+            "rew_grasp": 0,
+            "rew_success": 0,
         }
 
         # Return obs and info
@@ -233,24 +235,26 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.info["rew_jaw_center_to_object"] = rew_jaw_center_to_object
         rew_object_to_target = -np.linalg.norm(object_target_diff)
         self.info["rew_object_to_target"] = rew_object_to_target
-        self.info["rew_other"] = 0
+        self.info["rew_grasp"] = 0
+        self.info["rew_success"] = 0
 
         reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target)
         self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
         self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
 
-        # Grasp reward given once per episode when jaw center within 1.2 cm of cube center and jaw angle >= 39
+        # Grasp reward given once per episode when jaw center close enough to cube center and jaw is open
         jaw_pos_rad = obs[5]
-        if (self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_pos_rad >= 0.4):
+        # print(f"jaw_pos_rad={jaw_pos_rad} jaw_center_to_object={abs(rew_jaw_center_to_object)}")
+        if self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_pos_rad >= 0.4:
             # When grasped, immediate reward
             reward += self.grasp_reward
-            self.info["rew_other"] = self.grasp_reward
+            self.info["rew_grasp"] = self.grasp_reward
             self.grasp_reward = 0
 
-        if (abs(rew_object_to_target) < 0.02 and self.target_reached_reward > 0):
+        if abs(rew_object_to_target) < 0.02 and self.target_reached_reward > 0:
             reward += self.target_reached_reward
             self.info["is_success"] = 1
-            self.info["rew_other"] += self.target_reached_reward
+            self.info["rew_success"] = self.target_reached_reward
             self.target_reached_reward = 0
         return reward
 

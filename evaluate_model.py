@@ -13,7 +13,7 @@ Code to compute statistics on model performance.
 """
 # SETTINGS
 num_ep_evaluate = 100
-model_folder = "PPO-4b-fetch-ethan/9750000"
+model_folder = "PPO-8-fetch-ethan/4500000"
 
 
 def make_env():
@@ -43,8 +43,8 @@ def main():
     vec_env.obs_rms.count = 1
     vec_env.training = False
     vec_env.norm_reward = False  # Ensures fair comparison between different runs
-
-    model = PPO.load(model_path, env=vec_env)
+    custom_objects = {"lr_schedule": 3e-4, "clip_range": 0.2}
+    model = PPO.load(model_path, env=vec_env, custom_objects=custom_objects)
 
     # episode_info stores per-episode totals for each type of reward and length of each episode.
     episode_info = {}

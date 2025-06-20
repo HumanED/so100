@@ -7,9 +7,9 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
 
 # SETTINGS
-model_folder = "PPO-7-fetch-ethan/9000000"  # no .zip
+model_folder = "PPO-8-fetch-ethan/4500000"  # no .zip
 
-extra_delay = 0  # seconds
+extra_delay = 1  # seconds
 
 
 def make_env():
@@ -35,7 +35,8 @@ def main():
     vec_env.norm_reward = False  # Ensures fair comparison between different runs
 
     # Load model
-    model = PPO.load(model_path, env=vec_env)
+    custom_objects = {"lr_schedule": 3e-4, "clip_range": 0.2}
+    model = PPO.load(model_path, env=vec_env, custom_objects=custom_objects)
 
     # Compute dt value
     temp_env = SoFetchEnv()

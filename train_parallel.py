@@ -104,7 +104,8 @@ def main(models_dir, vec_stats_dir, logs_dir):
         vec_env = VecNormalize.load(os.path.join(vec_stats_dir, old_model_file + ".pkl"), vec_env)
         vec_env.training = True
         vec_env.norm_reward = True
-        model = PPO.load(os.path.join(models_dir, old_model_file), vec_env, seed=seed, tensorboard_log=os.path.normpath(logs_dir))
+        custom_objects = {"lr_schedule": 3e-4, "clip_range": 0.2}
+        model = PPO.load(os.path.join(models_dir, old_model_file), vec_env, seed=seed, tensorboard_log=os.path.normpath(logs_dir), custom_objects=custom_objects)
     else:
         # Normalize observation and rewards.
         # VecNormalize computes a RunningMeanStd (mean, std number) for observations and a RunningMeanStd for rewards
