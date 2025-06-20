@@ -140,10 +140,11 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             # "rew_other": 0,
             "rew_grasp": 0,
             "rew_success": 0,
+            "rew_jaw_open_prop":0
         }
 
         # Return obs and info
-        obs = self._get_obs()
+        obs, _ = self._get_obs()
         if self.render_mode == "human":
             self.render()
         return obs, self.info
@@ -209,10 +210,10 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             action = self.EMA.update(action)
         self._apply_action(action)
 
-        obs = self._get_obs()
+        obs, extra_obs = self._get_obs()
 
         # Compute reward
-        reward = self._compute_reward(obs)
+        reward = self._compute_reward(obs, extra_obs)
 
         terminated = truncated = False
         if (self.total_timesteps >= self.MAX_TIMESTEPS):
@@ -223,7 +224,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
         return obs, reward, terminated, truncated, self.info
 
-    def _compute_reward(self, obs):
+    def _compute_reward(self, obs, extra_obs):
         # TODO: Try a 2 staged reward where reward for getting jaw to next to the cube then lessen the cube reward and add reward for cube to target
         # TODO: Try using previous distance - current distance maybe later
         # TODO: Change logging to the composition of 0.75 etc of each
@@ -238,14 +239,20 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.info["rew_grasp"] = 0
         self.info["rew_success"] = 0
 
-        reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target)
+        jaw_top_pos = extra_obs[:3]
+        jaw_bottom_pos = extra_obs[3:6]
+        jaw_open_width = np.linalg.norm(jaw_top_pos - jaw_bottom_pos)
+        object_width = 0.02
+        rew_jaw_open = max(0, jaw_open_width - object_width)
+
+        reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target) + rew_jaw_open
         self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
         self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
+        self.info["rew_jaw_open_prop"] = rew_jaw_open
+
 
         # Grasp reward given once per episode when jaw center close enough to cube center and jaw is open
-        jaw_pos_rad = obs[5]
-        # print(f"jaw_pos_rad={jaw_pos_rad} jaw_center_to_object={abs(rew_jaw_center_to_object)}")
-        if self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_pos_rad >= 0.4:
+        if self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_open_width >= 0.04:
             # When grasped, immediate reward
             reward += self.grasp_reward
             self.info["rew_grasp"] = self.grasp_reward
@@ -285,7 +292,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         observation = [robot_qpos, robot_qvel, object_qpos, jaw_pos, object_jaw_diff, object_target_diff, self.goal]
 
         Indexing        [0 - 5 (robot_qpos), 6 - 11 (robot_qvel), 12 - 18 (object_qpos), 19 - 21 (jaw_pos), 22 - 24 (object_jaw_diff), 25 - 27 (object_target_diff), 28 - 30 (cube_qvel)]
-
+        extra_observation = [0 - 2 (jaw_top_pos), 3 - 5 (jaw_bottom_pos) ]
         robot_qpos:          6 numbers. Joint angles (radians) of 6 motors. 'robot_Rotation', 'robot_Pitch', 'robot_Elbow', 'robot_Wrist_Pitch', 'robot_Wrist_Roll', 'robot_Jaw' (items starting with robot_ in self._model_names.joint_names)
         robot_qvel:          6 numbers. Joint velocity (radians / sec) of 6 motors
         object_qpos:         7 numbers. Position (x,y,z) then orientation (w, x, y, z) of the cube
@@ -313,7 +320,12 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         observation = np.concatenate(
             [robot_qpos, robot_qvel, object_qpos, jaw_pos, object_jaw_diff, object_target_diff, self.goal])
         assert observation.shape == self.observation_space.shape, f"Expected obs shape {self.observation_space.shape} Actual shape {observation.shape}"
-        return observation
+
+        jaw_top_pos = mujoco_utils.get_site_xpos(self.model, self.data, "jaw_top_site")
+        jaw_bottom_pos = mujoco_utils.get_site_xpos(self.model, self.data, "jaw_bottom_site")
+        extra_observation = np.concatenate([jaw_top_pos, jaw_bottom_pos])
+
+        return observation, extra_observation
 
     # --- other utility methods
 
