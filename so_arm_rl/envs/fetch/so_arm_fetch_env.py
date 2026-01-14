@@ -244,8 +244,18 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         jaw_open_width = np.linalg.norm(jaw_top_pos - jaw_bottom_pos)
         object_width = 0.02
         rew_jaw_open = max(0, jaw_open_width - object_width)
+        weight1 = 0
+        weight2 = 0
 
-        reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target) + rew_jaw_open
+        if abs(rew_jaw_center_to_object) < 0.03 and jaw_open_width >= 0.04:
+            weight1 = 0.3 # do not care about reaching the cube as you are already there
+            weight2 = 1   # emphasize lifting
+        else:
+            weight1 = 0.8 # more importance on reaching the cube
+            weight2 = 0   # lifting is useless
+            
+
+        reward += (weight1 * rew_jaw_center_to_object) + (weight2 * rew_object_to_target) + rew_jaw_open
         self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
         self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
         self.info["rew_jaw_open_prop"] = rew_jaw_open
@@ -273,7 +283,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # TODO: Done
         ctrlrange = self.model.actuator_ctrlrange
         actuation_range = (ctrlrange[:, 1] - ctrlrange[:, 0]) / 2.0
-
+        
         if self.RELATIVE_CONTROL:
             actuation_center = np.zeros_like(action)
             for i in range(self.data.ctrl.shape[0]):
