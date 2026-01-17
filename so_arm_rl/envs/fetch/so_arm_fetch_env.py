@@ -1,14 +1,14 @@
 import os
 from typing import Optional
+
+import gymnasium
 import mujoco
 import numpy as np
-import gymnasium
 from gymnasium import spaces
-from gymnasium.utils import EzPickle
 from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
-from ..utils import rotations
+from gymnasium.utils import EzPickle
+
 from ..utils import mujoco_utils
-from ..utils import ema_util
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 0.5,
@@ -71,6 +71,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.grasp_reward = self.FIXED_GRASP_REWARD
         self.FIXED_TARGET_REACHED_REWARD = 30
         self.target_reached_reward = self.FIXED_TARGET_REACHED_REWARD
+        self.grasped = False
 
         N_ACTIONS = 6
         N_OBS = 31
@@ -128,6 +129,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # Reset the once-per episode rewards
         self.grasp_reward = self.FIXED_GRASP_REWARD
         self.target_reached_reward = self.FIXED_TARGET_REACHED_REWARD
+        self.grasped = False
 
         self.info = {
             "is_success": 0,
@@ -242,20 +244,29 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         jaw_top_pos = extra_obs[:3]
         jaw_bottom_pos = extra_obs[3:6]
         jaw_open_width = np.linalg.norm(jaw_top_pos - jaw_bottom_pos)
+        self.info["debug_jaw_open_width"] = jaw_open_width
         object_width = 0.02
         rew_jaw_open = max(0, jaw_open_width - object_width)
 
-        reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target) + rew_jaw_open
-        self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
-        self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
+        if self.grasped:
+            rew_center_to_object_weight = 0
+            rew_object_to_target_weight = 0.5 # Make every timestep in the grasped state even with equal distances less punishing.
+        else:
+            rew_center_to_object_weight = 1
+            rew_object_to_target_weight = 0
+
+        reward += (rew_center_to_object_weight * rew_jaw_center_to_object) + (rew_object_to_target_weight * rew_object_to_target) + rew_jaw_open
+        self.info["rew_jaw_center_to_object_prop"] = (rew_center_to_object_weight * rew_jaw_center_to_object)
+        self.info["rew_object_to_target_prop"] = (rew_object_to_target_weight * rew_object_to_target)
         self.info["rew_jaw_open_prop"] = rew_jaw_open
 
 
         # Grasp reward given once per episode when jaw center close enough to cube center and jaw is open
-        if self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_open_width >= 0.04:
+        if self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_open_width >= 0.03:
             # When grasped, immediate reward
             reward += self.grasp_reward
             self.info["rew_grasp"] = self.grasp_reward
+            self.grasp_reward = True
             self.grasp_reward = 0
 
         if abs(rew_object_to_target) < 0.02 and self.target_reached_reward > 0:

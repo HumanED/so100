@@ -48,7 +48,7 @@ class TensorboardCallback(BaseCallback):
 
     def _on_training_start(self) -> None:
         for k in self.training_env.get_attr("info")[0].keys():
-            if k.startswith("rew_"):
+            if k.startswith("rew_") or k.startswith('debug_'):
                 self.sub_rews_cumul[k] = 0
                 self.sub_rews_buffer[k] = np.zeros(self.training_env.get_attr("MAX_TIMESTEPS")[0])
 
@@ -63,7 +63,7 @@ class TensorboardCallback(BaseCallback):
             # The last timestep was not recorded so duplicate n-1th entry to form nth entry
             self.episode_count += 1
             for k, v in info.items():
-                if k.startswith("rew_"):
+                if k.startswith("rew_") or k.startswith('debug_'):
                     self.sub_rews_buffer[k][self.buffer_idx] = self.sub_rews_buffer[k][self.buffer_idx - 1] # Duplicate last entry
                     self.sub_rews_cumul[k] += np.sum(self.sub_rews_buffer[k])
                     self.sub_rews_buffer[k] = np.zeros(self.training_env.get_attr("MAX_TIMESTEPS")[0])
@@ -72,7 +72,7 @@ class TensorboardCallback(BaseCallback):
             self.ignore_reset_flag = False
             # Record sub rewards for this timestep
             for k, v in info.items():
-                if k.startswith("rew_"):
+                if k.startswith("rew_") or k.startswith('debug_'):
                     self.sub_rews_buffer[k][self.buffer_idx] = v
             self.buffer_idx += 1
 
