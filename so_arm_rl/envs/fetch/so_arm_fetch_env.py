@@ -242,6 +242,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         jaw_top_pos = extra_obs[:3]
         jaw_bottom_pos = extra_obs[3:6]
         jaw_open_width = np.linalg.norm(jaw_top_pos - jaw_bottom_pos)
+        self.info["rew_jaw_open_width"] = jaw_open_width
         object_width = 0.02
         rew_jaw_open = max(0, jaw_open_width - object_width)
         weight1 = 0
