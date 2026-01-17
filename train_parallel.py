@@ -48,7 +48,7 @@ class TensorboardCallback(BaseCallback):
 
     def _on_training_start(self) -> None:
         for k in self.training_env.get_attr("info")[0].keys():
-            if k.startswith("rew_"):
+            if k.startswith("rew_") or k.startswith("debug_"):
                 self.sub_rews_cumul[k] = 0
                 self.sub_rews_buffer[k] = np.zeros(self.training_env.get_attr("MAX_TIMESTEPS")[0])
 
