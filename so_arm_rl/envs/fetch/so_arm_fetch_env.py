@@ -142,7 +142,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             # "rew_other": 0,
             "rew_grasp": 0,
             "rew_success": 0,
-            "rew_jaw_open_prop":0
+            "rew_jaw_open_prop":0,
+            "debug_jaw_open_width": 0
         }
 
         # Return obs and info
