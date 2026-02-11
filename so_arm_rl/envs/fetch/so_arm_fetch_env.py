@@ -138,7 +138,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             "rew_jaw_center_to_object_prop": 0,
             "rew_object_to_target_prop": 0,
             "reset_flag": True,
-            # "rew_other": 0,
+            "rew_other": 0,
             "rew_grasp": 0,
             "rew_success": 0,
             # "rew_jaw_open_prop":0,
