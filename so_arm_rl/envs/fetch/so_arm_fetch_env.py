@@ -78,6 +78,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.grasp_reward = self.FIXED_GRASP_REWARD
         self.FIXED_TARGET_REACHED_REWARD = 30
         self.target_reached_reward = self.FIXED_TARGET_REACHED_REWARD
+        self.grasp_phase = False
+        self.GRASP_PHASE_DISTANCE = 0.05
 
         N_ACTIONS = 6
         N_OBS = 31
@@ -141,6 +143,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # Reset the once-per episode rewards
         self.grasp_reward = self.FIXED_GRASP_REWARD
         self.target_reached_reward = self.FIXED_TARGET_REACHED_REWARD
+        self.grasp_phase = False
 
         self.info = {
             "is_success": 0,
@@ -154,6 +157,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             "rew_grasp": 0,
             "rew_success": 0,
             "rew_jaw_open_prop": 0,
+            "grasp_phase": False,
         }
 
         # Return obs and info
@@ -244,7 +248,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         return obs, reward, terminated, truncated, self.info
 
     def _compute_reward(self, obs, extra_obs):
-        # TODO: Try a 2 staged reward where reward for getting jaw to next to the cube then lessen the cube reward and add reward for cube to target
+        # Two-stage reward: Phase 1 (pre-grasp) focuses on approach + open jaw, Phase 2 (grasp) focuses on closing + moving to target
         # TODO: Try using previous distance - current distance maybe later
         # TODO: Change logging to the composition of 0.75 etc of each
         """Reward function"""
@@ -262,25 +266,52 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         jaw_bottom_pos = extra_obs[3:6]
         jaw_open_width = np.linalg.norm(jaw_top_pos - jaw_bottom_pos)
         object_width = 0.02
-        # rew_jaw_open = max(0, jaw_open_width - object_width)
-        rew_jaw_open = (
-            -(object_width - jaw_open_width) if jaw_open_width < object_width else 0
-        )
-        # Penalizes being too closed, neutral when open enough
-        reward += (
-            (0.5 * rew_jaw_center_to_object)
-            + (0.5 * rew_object_to_target)
-            + 500 * rew_jaw_open
-        )
-        self.info["rew_jaw_center_to_object_prop"] = 0.5 * rew_jaw_center_to_object
-        self.info["rew_object_to_target_prop"] = 0.5 * rew_object_to_target
-        self.info["rew_jaw_open_prop"] = rew_jaw_open
+        distance_to_object = np.linalg.norm(object_jaw_diff)
 
-        # Grasp reward given once per episode when jaw center close enough to cube center and jaw is open
+        # Phase transition: switch to grasp phase when close to object
+        if not self.grasp_phase and distance_to_object < self.GRASP_PHASE_DISTANCE:
+            self.grasp_phase = True
+
+        if not self.grasp_phase:
+            # PRE-GRASP PHASE: approach object + keep jaw open
+            rew_jaw_open = max(0, jaw_open_width - 0.04)  # Reward being open (>4cm)
+            reward += (
+                (0.8 * rew_jaw_center_to_object)
+                + (0.2 * rew_object_to_target)
+                + 10.0 * rew_jaw_open
+            )
+            self.info["rew_jaw_center_to_object_prop"] = 0.8 * rew_jaw_center_to_object
+            self.info["rew_object_to_target_prop"] = 0.2 * rew_object_to_target
+            self.info["rew_jaw_open_prop"] = rew_jaw_open
+        else:
+            # GRASP PHASE: close jaw progressively + move object to target
+            jaw_open_max = max(0.08, object_width)
+            jaw_close_far_distance = 0.05
+            distance_scale = max(jaw_close_far_distance, 1e-6)
+            distance_ratio = np.clip(distance_to_object / distance_scale, 0.0, 1.0)
+            desired_jaw_width = object_width + distance_ratio * (
+                jaw_open_max - object_width
+            )
+            jaw_width_error = abs(jaw_open_width - desired_jaw_width)
+            jaw_width_range = max(jaw_open_max - object_width, 1e-6)
+            rew_jaw_open = 1.0 - (jaw_width_error / jaw_width_range)
+            reward += (
+                (0.3 * rew_jaw_center_to_object)
+                + (0.5 * rew_object_to_target)
+                + 3.0 * rew_jaw_open
+            )
+            self.info["rew_jaw_center_to_object_prop"] = 0.3 * rew_jaw_center_to_object
+            self.info["rew_object_to_target_prop"] = 0.5 * rew_object_to_target
+            self.info["rew_jaw_open_prop"] = rew_jaw_open
+
+        self.info["grasp_phase"] = self.grasp_phase
+
+        # Grasp reward given once per episode when in grasp phase, jaw near object, and jaw width correct
         if (
-            self.grasp_reward > 0
+            self.grasp_phase
+            and self.grasp_reward > 0
             and abs(rew_jaw_center_to_object) < 0.03
-            and jaw_open_width >= 0.04
+            and abs(jaw_open_width - object_width) <= 0.01
         ):
             # When grasped, immediate reward
             reward += self.grasp_reward
