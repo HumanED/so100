@@ -245,7 +245,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         object_width = 0.02
         rew_jaw_open = max(0, jaw_open_width - object_width)
 
-        reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target) + rew_jaw_open
+        reward += (0.75 * rew_jaw_center_to_object) + (0.25 * rew_object_to_target) + rew_jaw_open
         self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
         self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
         self.info["rew_jaw_open_prop"] = rew_jaw_open
