@@ -67,9 +67,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.GOAL_MAX = [0.5, 0.5, 0.5]
         self.GOAL_MIN = [0.1, 0.1, 0.1]
         self.initial_cube_position = np.array([0.25, -0.25, 0.025])
-        self.FIXED_GRASP_REWARD = 20
+        self.FIXED_GRASP_REWARD = 40
         self.grasp_reward = self.FIXED_GRASP_REWARD
-        self.FIXED_TARGET_REACHED_REWARD = 30
+        self.FIXED_TARGET_REACHED_REWARD = 60
         self.target_reached_reward = self.FIXED_TARGET_REACHED_REWARD
 
         N_ACTIONS = 6
@@ -245,9 +245,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         object_width = 0.02
         rew_jaw_open = max(0, jaw_open_width - object_width)
 
-        reward += (0.75 * rew_jaw_center_to_object) + (0.25 * rew_object_to_target) + rew_jaw_open
-        self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
-        self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
+        reward += (0.90 * rew_jaw_center_to_object) + (0.10 * rew_object_to_target) + rew_jaw_open
+        self.info["rew_jaw_center_to_object_prop"] = (0.90 * rew_jaw_center_to_object)
+        self.info["rew_object_to_target_prop"] = (0.10 * rew_object_to_target)
         self.info["rew_jaw_open_prop"] = rew_jaw_open
 
 

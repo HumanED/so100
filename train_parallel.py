@@ -14,12 +14,12 @@ Created by Ethan Cheam
 # SETTINGS
 vectorized_env = True  # Set to True to use multiple environments
 start_from_existing = False
-old_model_file = "PPO-4-fetch-ethan/4750000"
+old_model_file = "PPO-9-fetch-varun/3500000"
 # When you want to train PPO-20-shadowgym-ethan more and create PPO-21-shadowgym-ethan
 # Set old_model_file="PPO-21-shadowgym-ethan" and this_run_name="PPO-20-shadowgym-ethan"
 
 # Run name should have model, unique number, and your name
-this_run_name = "PPO-9-fetch-varun"
+this_run_name = "PPO-9a-fetch-varun"
 saving_timesteps_interval = 500_000
 start_saving = 1_000_000
 # Seed sets random number generators in model and environment
