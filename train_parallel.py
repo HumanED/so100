@@ -24,6 +24,8 @@ saving_timesteps_interval = 500_000
 start_saving = 1_000_000
 # Seed sets random number generators in model and environment
 seed = 1
+# If running on DICE machine overnight, set to 10_000_000. Run forever is None
+DICE_MAX_LIMIT = 10_000_000
 
 
 def make_env(rank, seed):
@@ -119,12 +121,14 @@ def main(models_dir, vec_stats_dir, logs_dir):
 
     # Training loop
     timesteps = 0
-    while True:
+    while DICE_MAX_LIMIT is None or timesteps < DICE_MAX_LIMIT:
         model.learn(saving_timesteps_interval, tb_log_name=this_run_name, reset_num_timesteps=False, callback=TensorboardCallback())
         timesteps += saving_timesteps_interval
         if timesteps >= start_saving:
             model.save(os.path.join(models_dir, this_run_name, str(timesteps)))
             vec_env.save(os.path.join(vec_stats_dir, this_run_name, str(timesteps) + ".pkl"))
+    model.save(os.path.join(models_dir, this_run_name, str(timesteps)))
+    vec_env.save(os.path.join(vec_stats_dir, this_run_name, str(timesteps) + ".pkl"))
 
 
 if __name__ == "__main__":

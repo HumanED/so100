@@ -8,7 +8,7 @@ from gymnasium import spaces
 from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
 from gymnasium.utils import EzPickle
 
-from ..utils import mujoco_utils
+from so_arm_rl.envs.utils import mujoco_utils
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 0.5,
@@ -16,9 +16,9 @@ DEFAULT_CAMERA_CONFIG = {
     "elevation": -25.0,
     "lookat": np.array([0.4, -0.6, 0.5]),
 }
-
-INITIAL_ARM_POSITION = {"robot_Rotation": 0, "robot_Pitch": -3.10, "robot_Elbow": 3.10, "robot_Wrist_Pitch": 0.0,
-                        "robot_Wrist_Roll": 0.0, "robot_Jaw": 0.0}
+# Based on keyframe values https://github.com/google-deepmind/mujoco_menagerie/blob/main/trs_so_arm100/so_arm100.xml
+INITIAL_ARM_POSITION = {"robot_Rotation": 0, "robot_Pitch": -1.57, "robot_Elbow": 1.57, "robot_Wrist_Pitch": 1.57,
+                        "robot_Wrist_Roll": -1.57, "robot_Jaw": 0.0}
 
 
 class SoFetchEnv(gymnasium.Env, EzPickle):
@@ -53,7 +53,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # ROTATION_THRESHOLD (float)        If angular rotation from current orientation to target orientation is below this threshold, goal is considered achieved. Unit is radians
         # RELATIVE_CONTROL (bool)           Set True to actuate hand using relative joint positions (following OpenAI) or False for absolute joint positions (like Pybullet model)
         # RANDOMIZE_INITIAL_ROTATION (bool) Set True to set cube orientation to a random orientation at start of episode.
-        # FIXED_GOAL (bool or list)         Fixed Euler goal. Set to None if we are not using a random goal instead of a fixed goal. Set to list e.g. [1,2,3] for goal of x=1, y=2, z=3 radians.
+        # FIXED_GOAL (bool)                 True if getting goal position of "target" body in scene.xml
         # MAX_GOALS                         Maximum number of goals to reach before truncating the environment
         # N_ACTIONS (integer)               size of the action space.
         # N_OBS (integer)                   size of observation space
@@ -63,10 +63,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.RELATIVE_CONTROL = False
         self.N_SUBSTEPS = 20
         self.EMA = None
-        self.FIXED_GOAL = [-0.2, -0.25, 0.1]
+        self.FIXED_GOAL = True
         self.GOAL_MAX = [0.5, 0.5, 0.5]
         self.GOAL_MIN = [0.1, 0.1, 0.1]
-        self.initial_cube_position = np.array([0.25, -0.25, 0.025])
         self.FIXED_GRASP_REWARD = 20
         self.grasp_reward = self.FIXED_GRASP_REWARD
         self.FIXED_TARGET_REACHED_REWARD = 30
@@ -74,7 +73,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.grasped = False
 
         N_ACTIONS = 6
-        N_OBS = 31
+        N_OBS = 28
         self.N_DISCRETE = 64
         self.action_space = gymnasium.spaces.MultiDiscrete(nvec=[self.N_DISCRETE] * N_ACTIONS)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(N_OBS,), dtype=np.float32)
@@ -142,8 +141,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             # "rew_other": 0,
             "rew_grasp": 0,
             "rew_success": 0,
-            "rew_jaw_open_prop":0,
-            "debug_jaw_open_width": 0
+            # "rew_jaw_open_prop":0,
+            # "debug_jaw_open_width": 0
+            "debug_jaw_pos_rad": 0
         }
 
         # Return obs and info
@@ -155,7 +155,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
     def _compute_goal(self) -> np.ndarray:
         """Returns goal position [x,y,z]"""
         if self.FIXED_GOAL:
-            new_goal = np.array(self.FIXED_GOAL.copy())
+            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
+            new_goal = self.data.xpos[body_id].copy()
         else:
             # Generate a random goal (x,y,z)
             new_goal = self.np_random.uniform(self.GOAL_MIN, self.GOAL_MAX)
@@ -165,24 +166,30 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         """Resets simulation and puts cube in fixed initial position depending on settings. Resets arm to fixed position"""
         # TODO: Add option for random initial position and orientation of cube within reach of the arm
         mujoco.mj_resetData(self.model, self.data)
+
+        for name, val in INITIAL_ARM_POSITION.items():
+            mujoco_utils.set_joint_qpos(self.model, self.data, name, val)
+            actuator_name = name.replace("robot_", "")  # joint "robot_Pitch" → actuator "Pitch"
+            actuator_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, actuator_name)
+            self.data.ctrl[actuator_id] = val
         mujoco.mj_forward(self.model, self.data)
-
-        # Set initial position and orientation (w,x,y,z) of the cube
-        initial_cube_quat = np.array([1, 0, 0, 0])
-        initial_cube_qpos = np.concatenate([self.initial_cube_position, initial_cube_quat])
-        mujoco_utils.set_joint_qpos(self.model, self.data, "object:joint", initial_cube_qpos)
-
-        # Set initial position of the arm
-        for joint_name, initial_position in INITIAL_ARM_POSITION.items():
-            mujoco_utils.set_joint_qpos(self.model, self.data, joint_name, initial_position)
 
         # Run the simulation for a bunch of timesteps to let everything settle in.
         for _ in range(10):
-            self._apply_action(np.zeros(self.action_space.shape))
             try:
                 mujoco.mj_step(self.model, self.data, nstep=self.N_SUBSTEPS)
             except Exception:
                 return False
+
+    def _rescale_actions(self, action: np.ndarray) -> np.ndarray:
+        """
+        Converts discrete actions to continuous actions in range [-1, 1] which mujoco expects.
+        """
+        rescaledAction = -1 + (action * 2) / (self.N_DISCRETE - 1)
+        if self.EMA != None:
+            rescaledAction = self.EMA.update(rescaledAction)
+        return rescaledAction
+
 
     def step(self, action: np.ndarray):
         """Run one timestep of the environment's dynamics using the agent actions.
@@ -208,10 +215,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
         # Rescale the angle between -1 and 1 for _apply_action(). See action space of https://robotics.farama.org/envs/shadow_dexterous_hand/manipulate_block/
         # See second min-max normalization formula https://en.wikipedia.org/wiki/Feature_scaling
-        action = -1 + (action * 2) / (self.N_DISCRETE - 1)
-        if self.EMA != None:
-            action = self.EMA.update(action)
-        self._apply_action(action)
+
+        self._apply_action(self._rescale_actions(action))
 
         obs, extra_obs = self._get_obs()
 
@@ -239,41 +244,25 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.info["rew_jaw_center_to_object"] = rew_jaw_center_to_object
         rew_object_to_target = -np.linalg.norm(object_target_diff)
         self.info["rew_object_to_target"] = rew_object_to_target
-        self.info["rew_grasp"] = 0
-        self.info["rew_success"] = 0
+        self.info["rew_other"] = 0
 
-        jaw_top_pos = extra_obs[:3]
-        jaw_bottom_pos = extra_obs[3:6]
-        jaw_open_width = np.linalg.norm(jaw_top_pos - jaw_bottom_pos)
-        self.info["debug_jaw_open_width"] = jaw_open_width
-        object_width = 0.02
-        rew_jaw_open = max(0, jaw_open_width - object_width)
+        reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target)
+        self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
+        self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
 
-        if self.grasped:
-            rew_center_to_object_weight = 0
-            rew_object_to_target_weight = 0.5 # Make every timestep in the grasped state even with equal distances less punishing.
-        else:
-            rew_center_to_object_weight = 1
-            rew_object_to_target_weight = 0
-
-        reward += (rew_center_to_object_weight * rew_jaw_center_to_object) + (rew_object_to_target_weight * rew_object_to_target) + rew_jaw_open
-        self.info["rew_jaw_center_to_object_prop"] = (rew_center_to_object_weight * rew_jaw_center_to_object)
-        self.info["rew_object_to_target_prop"] = (rew_object_to_target_weight * rew_object_to_target)
-        self.info["rew_jaw_open_prop"] = rew_jaw_open
-
-
-        # Grasp reward given once per episode when jaw center close enough to cube center and jaw is open
-        if self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_open_width >= 0.03:
+        # Grasp reward given once per episode when jaw center within 1.2 cm of cube center and jaw angle >= 39
+        jaw_pos_rad = obs[5]
+        self.info["debug_jaw_pos_rad"] = jaw_pos_rad
+        if (self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_pos_rad >= 0.4):
             # When grasped, immediate reward
             reward += self.grasp_reward
-            self.info["rew_grasp"] = self.grasp_reward
-            self.grasp_reward = True
+            self.info["rew_other"] = self.grasp_reward
             self.grasp_reward = 0
 
-        if abs(rew_object_to_target) < 0.02 and self.target_reached_reward > 0:
+        if (abs(rew_object_to_target) < 0.02 and self.target_reached_reward > 0):
             reward += self.target_reached_reward
             self.info["is_success"] = 1
-            self.info["rew_success"] = self.target_reached_reward
+            self.info["rew_other"] += self.target_reached_reward
             self.target_reached_reward = 0
         return reward
 
@@ -282,7 +271,6 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         Sends AI action (numpy array of numbers between -1 and 1) to Mujoco simulation and steps simulation to execute the action.
         Action can be relative position or absolute position based on settings
         """
-        # TODO: Done
         ctrlrange = self.model.actuator_ctrlrange
         actuation_range = (ctrlrange[:, 1] - ctrlrange[:, 0]) / 2.0
 
@@ -291,7 +279,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             for i in range(self.data.ctrl.shape[0]):
                 # In xml, joints start with robot_ but actuators don't
                 actuation_center[i] = self.data.get_joint_qpos(
-                    self.model.actuator_names[i].lstrip("robot_", "")
+                    self.model.actuator_names[i].lstrip("robot_")
                 )
         else:
             actuation_center = (ctrlrange[:, 1] + ctrlrange[:, 0]) / 2.0
@@ -301,9 +289,10 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
     def _get_obs(self):
         """
-        observation = [robot_qpos, robot_qvel, object_qpos, jaw_pos, object_jaw_diff, object_target_diff, self.goal]
+        Removed self.goal from observation 11/2/2026 as information already encoded in object_target_diff
+        observation = [robot_qpos, robot_qvel, object_qpos, jaw_pos, object_jaw_diff, object_target_diff]
 
-        Indexing        [0 - 5 (robot_qpos), 6 - 11 (robot_qvel), 12 - 18 (object_qpos), 19 - 21 (jaw_pos), 22 - 24 (object_jaw_diff), 25 - 27 (object_target_diff), 28 - 30 (cube_qvel)]
+        Indexing        [0 - 5 (robot_qpos), 6 - 11 (robot_qvel), 12 - 18 (object_qpos), 19 - 21 (jaw_pos), 22 - 24 (object_jaw_diff), 25 - 27 (object_target_diff)]
         extra_observation = [0 - 2 (jaw_top_pos), 3 - 5 (jaw_bottom_pos) ]
         robot_qpos:          6 numbers. Joint angles (radians) of 6 motors. 'robot_Rotation', 'robot_Pitch', 'robot_Elbow', 'robot_Wrist_Pitch', 'robot_Wrist_Roll', 'robot_Jaw' (items starting with robot_ in self._model_names.joint_names)
         robot_qvel:          6 numbers. Joint velocity (radians / sec) of 6 motors
@@ -311,7 +300,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         jaw_pos:             3 numbers. Position (x,y,z) of the jaw
         object_jaw_diff:     3 numbers. Difference between position of the object and jaw (object - jaw)
         object_target_diff:  3 numbers. Difference between position of the object and target location (object - target)
-        self.goal:           3 numbers. Position (x,y,z) of the goal
+
         """
         robot_qpos, robot_qvel = mujoco_utils.robot_get_obs(
             self.model, self.data, self._model_names.joint_names
@@ -330,7 +319,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         object_target_diff = object_qpos[:3] - self.goal
 
         observation = np.concatenate(
-            [robot_qpos, robot_qvel, object_qpos, jaw_pos, object_jaw_diff, object_target_diff, self.goal])
+            [robot_qpos, robot_qvel, object_qpos, jaw_pos, object_jaw_diff, object_target_diff])
         assert observation.shape == self.observation_space.shape, f"Expected obs shape {self.observation_space.shape} Actual shape {observation.shape}"
 
         jaw_top_pos = mujoco_utils.get_site_xpos(self.model, self.data, "jaw_top_site")
@@ -353,9 +342,6 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         render_target = np.concatenate([self.goal, np.array([1, 0, 0, 0])])
         assert render_target.shape == (7,), f"Actual goal shape {render_target.shape}"
 
-        mujoco_utils.set_joint_qpos(self.model, self.data, "target:joint", render_target)
-        mujoco_utils.set_joint_qvel(self.model, self.data, "target:joint", np.zeros(6))
-
         if "object_hidden" in self._model_names.geom_names:
             hidden_id = self._model_names.geom_name2id["object_hidden"]
             self.model.geom_rgba[hidden_id, 3] = 1.0
@@ -370,3 +356,5 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         """
         if self.mujoco_renderer is not None:
             self.mujoco_renderer.close()
+
+

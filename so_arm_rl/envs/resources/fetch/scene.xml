@@ -28,14 +28,15 @@
       <site name="object:center" pos="0 0 0" rgba="1 0 0 0" size="0.01 0.01 0.01"></site>
       <joint name="object:joint" type="free" damping="0.01"></joint>
     </body>
-    <!--    Debug cube On floor target is "-0.3 -0.2 0.025"-->
+    <!--    Debug cube On floor target is old "-0.2 -0.25 0.1" -->
     <body name="target" pos="-0.2 -0.25 0.1">
       <geom name="target" type="box" size="0.02 0.02 0.02" condim="4" group="2" contype="0" conaffinity="0"
             material="target"></geom>
       <!--      Cube with a solid hitbox. Do NOT turn on hitbox while training the model. Below line must be commented out during training-->
       <!--          <geom name="target" type="box" size="0.02 0.02 0.02" condim="4" group="2" material="target" ></geom>-->
       <site name="target:center" pos="0 0 0" rgba="1 0 0 0" size="0.01 0.01 0.01"></site>
-      <joint name="target:joint" type="free" damping="0.01"></joint>
+<!--      Removed the free joint so unaffected by gravity-->
+<!--      <joint name="target:joint" type="free" damping="0.01"></joint>-->
     </body>
   </worldbody>
 </mujoco>
