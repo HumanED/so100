@@ -19,7 +19,7 @@ old_model_file = "PPO-4-fetch-ethan/4750000"
 # Set old_model_file="PPO-21-shadowgym-ethan" and this_run_name="PPO-20-shadowgym-ethan"
 
 # Run name should have model, unique number, and your name
-this_run_name = "PPO-8-fetch-ethan"
+this_run_name = "PPO-9-fetch-varun"
 saving_timesteps_interval = 500_000
 start_saving = 1_000_000
 # Seed sets random number generators in model and environment
@@ -88,6 +88,7 @@ class TensorboardCallback(BaseCallback):
         self.episode_count = 0
         for k in self.sub_rews_cumul.keys():
             self.sub_rews_cumul[k] = 0
+
 def main(models_dir, vec_stats_dir, logs_dir):
     if vectorized_env:
         num_envs = os.cpu_count() # Number of parallel environments. Equal to number of CPU cores
@@ -97,7 +98,6 @@ def main(models_dir, vec_stats_dir, logs_dir):
         vec_env = DummyVecEnv([make_env(0, seed)])
 
     vec_env = VecMonitor(vec_env, filename=None)
-
 
     # Load existing model or create a new model
     if start_from_existing:
