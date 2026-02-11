@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
 
 # SETTINGS
-model_folder = "PPO-8-fetch-ethan/4500000"  # no .zip
+model_folder = "PPO-01-fetch-santiago/33500000"  # no .zip
 
 extra_delay = 1  # seconds
 
@@ -21,10 +21,14 @@ def make_env():
 
 
 def main():
-    model_path = os.path.join(os.path.dirname(__file__), "models", model_folder + ".zip")
+    model_path = os.path.join(
+        os.path.dirname(__file__), "models", model_folder + ".zip"
+    )
     if not os.path.exists(model_path):
         raise Exception("Error: model not found")
-    vec_stats_path = os.path.join(os.path.dirname(__file__), "vec_norm_stats", model_folder + ".pkl")
+    vec_stats_path = os.path.join(
+        os.path.dirname(__file__), "vec_norm_stats", model_folder + ".pkl"
+    )
     if not os.path.exists(vec_stats_path):
         raise Exception("Error: VecNormalize mean and std stats file not found")
 
@@ -62,7 +66,9 @@ def main():
         while not done:
             start_time = time.time()
             action_vector, _ = model.predict(obs_vector)
-            obs_vector, reward_vector, dones_vector, info_vector = vec_env.step(action_vector)
+            obs_vector, reward_vector, dones_vector, info_vector = vec_env.step(
+                action_vector
+            )
             done = dones_vector[0]
 
             for k, v in info_vector[0].items():
@@ -74,7 +80,7 @@ def main():
 
             time_to_process = time.time() - start_time
             delay_time = time_between_frames - time_to_process + extra_delay
-            if (delay_time > 0):
+            if delay_time > 0:
                 time.sleep(delay_time)  # proper time
 
         print(f"Episode complete. episode_reward:   {episode_reward:.3f} ")
