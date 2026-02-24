@@ -3,6 +3,7 @@ import os
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.logger import TensorBoardOutputFormat
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize, DummyVecEnv, VecMonitor
 
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
@@ -19,7 +20,7 @@ old_model_file = "PPO-4-fetch-ethan/4750000"
 # Set old_model_file="PPO-21-shadowgym-ethan" and this_run_name="PPO-20-shadowgym-ethan"
 
 # Run name should have model, unique number, and your name
-this_run_name = "PPO-9-fetch-ethan"
+this_run_name = "PPO-10-fetch-ethan-debug"
 saving_timesteps_interval = 500_000
 start_saving = 1_000_000
 # Seed sets random number generators in model and environment
@@ -40,6 +41,7 @@ def make_env(rank, seed):
 class TensorboardCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
+
         self.episode_count = 0
         # Cumulative rewards of sub-reward component
         self.sub_rews_cumul = {}
@@ -49,6 +51,15 @@ class TensorboardCallback(BaseCallback):
         self.ignore_reset_flag = True
 
     def _on_training_start(self) -> None:
+        output_formats = self.logger.output_formats
+        # Save reference to tensorboard formatter object
+        # note: the failure case (not formatter found) is not handled here, should be done with try/except.
+        self.tb_formatter = None
+        try:
+            self.tb_formatter = next(
+                formatter for formatter in output_formats if isinstance(formatter, TensorBoardOutputFormat))
+        except Exception as e:
+            self.logger.warn("Unable to create tensorboard output format: {}".format(e))
         for k in self.training_env.get_attr("info")[0].keys():
             if k.startswith("rew_") or k.startswith('debug_'):
                 self.sub_rews_cumul[k] = 0
@@ -73,6 +84,7 @@ class TensorboardCallback(BaseCallback):
         else:
             self.ignore_reset_flag = False
             # Record sub rewards for this timestep
+
             for k, v in info.items():
                 if k.startswith("rew_") or k.startswith('debug_'):
                     self.sub_rews_buffer[k][self.buffer_idx] = v
@@ -82,14 +94,24 @@ class TensorboardCallback(BaseCallback):
 
     def _on_rollout_end(self) -> None:
         # Tensorboard cannot print numpy floats.
+
+        debug_payload = dict()
         for k, v in self.sub_rews_cumul.items():
             if self.episode_count > 0:
                 self.logger.record(f"rollout/{k}_mean", float(self.sub_rews_cumul[k]) / self.episode_count)
+                if k.startswith("debug_"):
+                    debug_payload[k[6:]] = float(self.sub_rews_cumul[k]) / self.episode_count
             else:
                 self.logger.record(f"rollout/{k}_mean", 0)
+                if k.startswith("debug_"):
+                    debug_payload[k[6:]] = 0
+        self.tb_formatter.writer.add_scalars('debug', debug_payload, self.num_timesteps)
+
+
         self.episode_count = 0
         for k in self.sub_rews_cumul.keys():
             self.sub_rews_cumul[k] = 0
+
 def main(models_dir, vec_stats_dir, logs_dir):
     if vectorized_env:
         num_envs = os.cpu_count() # Number of parallel environments. Equal to number of CPU cores

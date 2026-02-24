@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, TypedDict
 
 import gymnasium
 import mujoco
@@ -19,6 +19,17 @@ DEFAULT_CAMERA_CONFIG = {
 # Based on keyframe values https://github.com/google-deepmind/mujoco_menagerie/blob/main/trs_so_arm100/so_arm100.xml
 INITIAL_ARM_POSITION = {"robot_Rotation": 0, "robot_Pitch": -1.57, "robot_Elbow": 1.57, "robot_Wrist_Pitch": 1.57,
                         "robot_Wrist_Roll": -1.57, "robot_Jaw": 0.0}
+
+class InfoDict(TypedDict):
+    is_success: int
+    total_timesteps: int
+    debug_jaw_top_to_target: float | int
+    debug_jaw_bottom_to_target: float | int
+    debug_jaw_center_to_object: float | int  # d1 'distance from end effector to cylinder'
+    reset_flag: bool
+    debug_object_to_target: float | int  # d3 'distance from cylinder to goal'
+    debug_jaw_total_dist_to_object: float | int  # d2 'sum of distances of each finger'
+    debug_regularisation: float | int
 
 
 class SoFetchEnv(gymnasium.Env, EzPickle):
@@ -59,6 +70,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # N_OBS (integer)                   size of observation space
         # FULLPATH                          Path to Mujoco XML file holding robot hand, floor and cube of the simulation environment
 
+        self.info:InfoDict = None
         self.MAX_TIMESTEPS = 100  # 8 seconds real time. Do NOT rename this attribute.
         self.RELATIVE_CONTROL = False
         self.N_SUBSTEPS = 20
@@ -71,6 +83,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.FIXED_TARGET_REACHED_REWARD = 30
         self.target_reached_reward = self.FIXED_TARGET_REACHED_REWARD
         self.grasped = False
+        self.prev_action = None
 
         N_ACTIONS = 6
         N_OBS = 28
@@ -86,10 +99,10 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self._load_mujoco_robot()
         self.goal = np.zeros(0)
         self.total_timesteps = 0
-        self.info = {
-            "is_success": 0,
-            "total_timesteps": 0,
-        }
+        # self.info: InfoDict = {
+        #     "is_success": 0,
+        #     "total_timesteps": 0,
+        # }
         self.render_mode = render_mode
         self.mujoco_renderer = MujocoRenderer(
             self.model,
@@ -126,24 +139,16 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.goal = self._compute_goal()
 
         # Reset the once-per episode rewards
-        self.grasp_reward = self.FIXED_GRASP_REWARD
-        self.target_reached_reward = self.FIXED_TARGET_REACHED_REWARD
-        self.grasped = False
-
-        self.info = {
+        self.info:InfoDict = {
             "is_success": 0,
             "total_timesteps": 0,
-            "rew_jaw_center_to_object": 0,
-            "rew_object_to_target": 0,
-            "rew_jaw_center_to_object_prop": 0,
-            "rew_object_to_target_prop": 0,
+            "debug_jaw_top_to_target": 0,
+            "debug_jaw_bottom_to_target": 0,
+            "debug_jaw_center_to_object": 0, # d1 'distance from end effector to cylinder' in paper
             "reset_flag": True,
-            "rew_other": 0,
-            "rew_grasp": 0,
-            "rew_success": 0,
-            # "rew_jaw_open_prop":0,
-            # "debug_jaw_open_width": 0
-            "debug_jaw_pos_rad": 0
+            "debug_object_to_target": 0, # d3 'distance from cylinder to goal' in paper
+            "debug_jaw_total_dist_to_object": 0, # d2 'sum of distances of each finger' to the cylinder
+            "debug_regularisation": 0,
         }
 
         # Return obs and info
@@ -216,7 +221,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # Rescale the angle between -1 and 1 for _apply_action(). See action space of https://robotics.farama.org/envs/shadow_dexterous_hand/manipulate_block/
         # See second min-max normalization formula https://en.wikipedia.org/wiki/Feature_scaling
 
-        self._apply_action(self._rescale_actions(action))
+        rescaled_actions = self._rescale_actions(action)
+        self.prev_action = rescaled_actions
+        self._apply_action(rescaled_actions)
 
         obs, extra_obs = self._get_obs()
 
@@ -237,33 +244,40 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # TODO: Try using previous distance - current distance maybe later
         # TODO: Change logging to the composition of 0.75 etc of each
         """Reward function"""
+        # d1 distance between jaw center and object
         object_jaw_diff = obs[22:25]
-        object_target_diff = obs[25:28]
-        reward = 0
-        rew_jaw_center_to_object = -np.linalg.norm(object_jaw_diff)
-        self.info["rew_jaw_center_to_object"] = rew_jaw_center_to_object
-        rew_object_to_target = -np.linalg.norm(object_target_diff)
-        self.info["rew_object_to_target"] = rew_object_to_target
-        self.info["rew_other"] = 0
+        jaw_center_to_object = np.linalg.norm(object_jaw_diff)
+        d1 = jaw_center_to_object
+        self.info["debug_jaw_center_to_object"] = d1
 
-        reward += (0.5 * rew_jaw_center_to_object) + (0.5 * rew_object_to_target)
-        self.info["rew_jaw_center_to_object_prop"] = (0.5 * rew_jaw_center_to_object)
-        self.info["rew_object_to_target_prop"] = (0.5 * rew_object_to_target)
+        # distance from center of cube to edges = sqrt(2**2 + s**2)
+        cube_diagonal_width = 0.028
+        # d2 distance between jaw fingers and object
+        object_pos = obs[12:15]
+        jaw_top_object_dist =  np.linalg.norm(object_pos - extra_obs[0:3])
+        jaw_bottom_object_dist =  np.linalg.norm(object_pos - extra_obs[3:6])
+        d2 = jaw_top_object_dist + jaw_bottom_object_dist - (2 * cube_diagonal_width)
 
-        # Grasp reward given once per episode when jaw center within 1.2 cm of cube center and jaw angle >= 39
-        jaw_pos_rad = obs[5]
-        self.info["debug_jaw_pos_rad"] = jaw_pos_rad
-        if (self.grasp_reward > 0 and abs(rew_jaw_center_to_object) < 0.03 and jaw_pos_rad >= 0.4):
-            # When grasped, immediate reward
-            reward += self.grasp_reward
-            self.info["rew_other"] = self.grasp_reward
-            self.grasp_reward = 0
+        self.info["debug_jaw_top_to_target"] = jaw_top_object_dist
+        self.info["debug_jaw_bottom_to_target"] = jaw_bottom_object_dist
+        self.info["debug_jaw_total_dist_to_object"] = d2
 
-        if (abs(rew_object_to_target) < 0.02 and self.target_reached_reward > 0):
-            reward += self.target_reached_reward
-            self.info["is_success"] = 1
-            self.info["rew_other"] += self.target_reached_reward
-            self.target_reached_reward = 0
+        # d3 distance between object and target
+        object_target_diff = np.linalg.norm(obs[25:28])
+        self.info["debug_object_to_target"] = object_target_diff
+        d3 = object_target_diff
+
+        reward = 1 / (1 + (
+            d1 * 1
+            + d2 * 1
+            + d3 * 1
+        ))
+        if self.prev_action is not None:
+            regularisation = np.linalg.norm(self.prev_action) * 10**-3
+            self.info["debug_regularisation"] = regularisation
+            reward -= regularisation
+
+
         return reward
 
     def _apply_action(self, action: np.ndarray):
