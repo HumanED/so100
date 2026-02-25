@@ -70,6 +70,7 @@ def main():
         user_input = [slider.get() for slider in sliders]
         action = np.array(user_input)
         # print(action)
+        info: dict = dict()
         obs, rew, terminated, truncated, info = env.step(action)
         stat.total_episode_reward += rew
         label_text = ""
@@ -78,10 +79,10 @@ def main():
         label_text += f"total_episode_rew {stat.total_episode_reward:.3f}\n"
         label_text += f"grasp_reward_issued {stat.grasped_reward_issued}\n"
         label_text += f"target_reward_issued {stat.target_reward_issued}\n"
-        if info["rew_grasp"] == env.FIXED_GRASP_REWARD:
+        if  info.get("rew_grasp", -1) == env.FIXED_GRASP_REWARD:
             print("Successful grasp")
             stat.grasped_reward_issued = True
-        if info["rew_success"] == env.FIXED_TARGET_REACHED_REWARD:
+        if info.get("rew_success", -1) == env.FIXED_TARGET_REACHED_REWARD:
             print("Goal achieved")
             stat.target_reward_issued = True
         obs_label.config(text=f"Info: {label_text}")

@@ -7,9 +7,9 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
 
 # SETTINGS
-model_folder = "PPO-8-fetch-ethan/4500000"  # no .zip
+model_folder = "PPO-10-fetch-ethan/10000000"  # no .zip
 
-extra_delay = 1  # seconds
+extra_delay = 0.2  # seconds
 
 
 def make_env():
@@ -47,7 +47,7 @@ def main():
     vec_env.reset()
     info = vec_env.get_attr("info")[0]
     for key in info.keys():
-        if key.startswith("rew") or key == "is_success":
+        if key.startswith("rew") or key == "is_success" or key.startswith("debug"):
             cur_episode_info[key] = 0
 
     while True:

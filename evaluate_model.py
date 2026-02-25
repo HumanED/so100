@@ -13,7 +13,7 @@ Code to compute statistics on model performance.
 """
 # SETTINGS
 num_ep_evaluate = 100
-model_folder = "PPO-8-fetch-ethan/4500000"
+model_folder = "PPO-10-fetch-ethan/10000000"
 
 
 def make_env():
