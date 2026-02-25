@@ -30,6 +30,9 @@ class InfoDict(TypedDict):
     debug_object_to_target: float | int  # d3 'distance from cylinder to goal'
     debug_jaw_total_dist_to_object: float | int  # d2 'sum of distances of each finger'
     debug_regularisation: float | int
+    debug_grasp_reward: float | int
+    debug_jaw_angle: float | int
+    debug_rew_standard: float | int
 
 
 class SoFetchEnv(gymnasium.Env, EzPickle):
@@ -149,6 +152,9 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             "debug_object_to_target": 0, # d3 'distance from cylinder to goal' in paper
             "debug_jaw_total_dist_to_object": 0, # d2 'sum of distances of each finger' to the cylinder
             "debug_regularisation": 0,
+            "debug_grasp_reward": 0,
+            "debug_jaw_angle": 0,
+            "debug_rew_standard": 0,
         }
 
         # Return obs and info
@@ -267,16 +273,26 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.info["debug_object_to_target"] = object_target_diff
         d3 = object_target_diff
 
+        weight = 50
+        jaw_angle = obs[5]
+        min_angle = 0.220 # angle below which no grasp reward is given. Encourages jaw to be at least min_angle open
+        self.info["debug_jaw_angle"] = jaw_angle
+        object_jaw_proximity_threshold = 0.035 # jaw center must be at least this close to cube center for grasp reward.
+        grasp_reward = weight * max(0, jaw_angle - min_angle) * max(0, object_jaw_proximity_threshold - d1)
+        self.info["debug_grasp_reward"] = grasp_reward
+
         reward = 1 / (1 + (
             d1 * 1
             + d2 * 1
             + d3 * 1
         ))
+        self.info["debug_rew_standard"] = reward
+        reward += grasp_reward
+
         if self.prev_action is not None:
             regularisation = np.linalg.norm(self.prev_action) * 10**-3
             self.info["debug_regularisation"] = regularisation
             reward -= regularisation
-
 
         return reward
 
