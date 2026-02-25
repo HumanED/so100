@@ -24,7 +24,7 @@
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
     <!--    Cube -->
     <body name="object" pos="0.3 -0.3 0.025">
-      <geom name="object" type="box" size="0.02 0.02 0.02" condim="4" density="567" material="object"></geom>
+      <geom name="object" type="box" size="0.015 0.015 0.015" condim="4" density="567" material="object"></geom>
       <site name="object:center" pos="0 0 0" rgba="1 0 0 0" size="0.01 0.01 0.01"></site>
       <joint name="object:joint" type="free" damping="0.01"></joint>
     </body>

@@ -250,8 +250,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         d1 = jaw_center_to_object
         self.info["debug_jaw_center_to_object"] = d1
 
-        # distance from center of cube to edges = sqrt(2**2 + s**2)
-        cube_diagonal_width = 0.028
+        # distance from center of cube to edges = sqrt(1**2 + 1**2)
+        cube_diagonal_width = 0.0213
         # d2 distance between jaw fingers and object
         object_pos = obs[12:15]
         jaw_top_object_dist =  np.linalg.norm(object_pos - extra_obs[0:3])
