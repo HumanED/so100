@@ -17,15 +17,24 @@ DEFAULT_CAMERA_CONFIG = {
     "lookat": np.array([0.4, -0.6, 0.5]),
 }
 # Based on keyframe values https://github.com/google-deepmind/mujoco_menagerie/blob/main/trs_so_arm100/so_arm100.xml
-INITIAL_ARM_POSITION = {"robot_Rotation": 0, "robot_Pitch": -1.57, "robot_Elbow": 1.57, "robot_Wrist_Pitch": 1.57,
-                        "robot_Wrist_Roll": -1.57, "robot_Jaw": 0.0}
+INITIAL_ARM_POSITION = {
+    "robot_Rotation": 0,
+    "robot_Pitch": -1.57,
+    "robot_Elbow": 1.57,
+    "robot_Wrist_Pitch": 1.57,
+    "robot_Wrist_Roll": -1.57,
+    "robot_Jaw": 0.0,
+}
+
 
 class InfoDict(TypedDict):
     is_success: int
     total_timesteps: int
     debug_jaw_top_to_target: float | int
     debug_jaw_bottom_to_target: float | int
-    debug_jaw_center_to_object: float | int  # d1 'distance from end effector to cylinder'
+    debug_jaw_center_to_object: (
+        float | int
+    )  # d1 'distance from end effector to cylinder'
     reset_flag: bool
     debug_object_to_target: float | int  # d3 'distance from cylinder to goal'
     debug_jaw_total_dist_to_object: float | int  # d2 'sum of distances of each finger'
@@ -39,6 +48,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
     """
     Gymnasium environment of the SO-100 arm https://github.com/huggingface/lerobot/blob/main/examples/10_use_so100.md
     """
+
     metadata = {
         "render_modes": [
             "human",
@@ -48,8 +58,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
     }
 
     def __init__(
-            self,
-            render_mode: Optional[str] = None,
+        self,
+        render_mode: Optional[str] = None,
     ):
         """
         Initialize environment
@@ -73,7 +83,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         # N_OBS (integer)                   size of observation space
         # FULLPATH                          Path to Mujoco XML file holding robot hand, floor and cube of the simulation environment
 
-        self.info:InfoDict = None
+        self.info: InfoDict = None
         self.MAX_TIMESTEPS = 100  # 8 seconds real time. Do NOT rename this attribute.
         self.RELATIVE_CONTROL = False
         self.N_SUBSTEPS = 20
@@ -91,10 +101,16 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         N_ACTIONS = 6
         N_OBS = 28
         self.N_DISCRETE = 64
-        self.action_space = gymnasium.spaces.MultiDiscrete(nvec=[self.N_DISCRETE] * N_ACTIONS)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(N_OBS,), dtype=np.float32)
+        self.action_space = gymnasium.spaces.MultiDiscrete(
+            nvec=[self.N_DISCRETE] * N_ACTIONS
+        )
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(N_OBS,), dtype=np.float32
+        )
 
-        self.FULLPATH = os.path.join(os.path.dirname(__file__), "../resources", "fetch", "scene.xml")
+        self.FULLPATH = os.path.join(
+            os.path.dirname(__file__), "../resources", "fetch", "scene.xml"
+        )
         self.SCREEN_WIDTH = 1200
         self.SCREEN_HEIGHT = 800
         # END SETTINGS
@@ -124,10 +140,10 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.model.vis.global_.offheight = self.SCREEN_HEIGHT
 
     def reset(
-            self,
-            *,
-            seed: Optional[int] = None,
-            options: Optional[dict] = None,
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
     ):
         """
         Reset the environment, counters, self.info, position of cube and hand, and goal
@@ -142,15 +158,15 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.goal = self._compute_goal()
 
         # Reset the once-per episode rewards
-        self.info:InfoDict = {
+        self.info: InfoDict = {
             "is_success": 0,
             "total_timesteps": 0,
             "debug_jaw_top_to_target": 0,
             "debug_jaw_bottom_to_target": 0,
-            "debug_jaw_center_to_object": 0, # d1 'distance from end effector to cylinder' in paper
+            "debug_jaw_center_to_object": 0,  # d1 'distance from end effector to cylinder' in paper
             "reset_flag": True,
-            "debug_object_to_target": 0, # d3 'distance from cylinder to goal' in paper
-            "debug_jaw_total_dist_to_object": 0, # d2 'sum of distances of each finger' to the cylinder
+            "debug_object_to_target": 0,  # d3 'distance from cylinder to goal' in paper
+            "debug_jaw_total_dist_to_object": 0,  # d2 'sum of distances of each finger' to the cylinder
             "debug_regularisation": 0,
             "debug_grasp_reward": 0,
             "debug_jaw_angle": 0,
@@ -180,8 +196,12 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
 
         for name, val in INITIAL_ARM_POSITION.items():
             mujoco_utils.set_joint_qpos(self.model, self.data, name, val)
-            actuator_name = name.replace("robot_", "")  # joint "robot_Pitch" → actuator "Pitch"
-            actuator_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, actuator_name)
+            actuator_name = name.replace(
+                "robot_", ""
+            )  # joint "robot_Pitch" → actuator "Pitch"
+            actuator_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, actuator_name
+            )
             self.data.ctrl[actuator_id] = val
         mujoco.mj_forward(self.model, self.data)
 
@@ -200,7 +220,6 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         if self.EMA != None:
             rescaledAction = self.EMA.update(rescaledAction)
         return rescaledAction
-
 
     def step(self, action: np.ndarray):
         """Run one timestep of the environment's dynamics using the agent actions.
@@ -237,7 +256,7 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         reward = self._compute_reward(obs, extra_obs)
 
         terminated = truncated = False
-        if (self.total_timesteps >= self.MAX_TIMESTEPS):
+        if self.total_timesteps >= self.MAX_TIMESTEPS:
             truncated = True
 
         if self.render_mode == "human":
@@ -260,8 +279,8 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         cube_diagonal_width = 0.0213
         # d2 distance between jaw fingers and object
         object_pos = obs[12:15]
-        jaw_top_object_dist =  np.linalg.norm(object_pos - extra_obs[0:3])
-        jaw_bottom_object_dist =  np.linalg.norm(object_pos - extra_obs[3:6])
+        jaw_top_object_dist = np.linalg.norm(object_pos - extra_obs[0:3])
+        jaw_bottom_object_dist = np.linalg.norm(object_pos - extra_obs[3:6])
         d2 = jaw_top_object_dist + jaw_bottom_object_dist - (2 * cube_diagonal_width)
 
         self.info["debug_jaw_top_to_target"] = jaw_top_object_dist
@@ -273,21 +292,29 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self.info["debug_object_to_target"] = object_target_diff
         d3 = object_target_diff
 
-        weight = 50
+        close_weight = 50
         jaw_angle = obs[5]
-        min_angle = 0.220 # angle below which no grasp reward is given. Encourages jaw to be at least min_angle open
         self.info["debug_jaw_angle"] = jaw_angle
-        object_jaw_proximity_threshold = 0.035 # jaw center must be at least this close to cube center for grasp reward.
-        grasp_reward = weight * max(0, jaw_angle - min_angle) * max(0, object_jaw_proximity_threshold - d1)
+        object_jaw_proximity_threshold = 0.035  # jaw center must be at least this close to cube center for grasp reward.
+        if d1 < object_jaw_proximity_threshold:
+            # Reward jaw fingers closing around cube: small d2 = more reward
+            grasp_reward = (
+                close_weight
+                * max(0, object_jaw_proximity_threshold - d1)
+                * max(0, 0.05 - d2)
+            )
+        else:
+            grasp_reward = 0
         self.info["debug_grasp_reward"] = grasp_reward
 
-        reward = 1 / (1 + (
-            d1 * 1
-            + d2 * 1
-            + d3 * 1
-        ))
+        reward = 1 / (1 + (d1 * 1 + d2 * 1 + d3 * 1))
         self.info["debug_rew_standard"] = reward
         reward += grasp_reward
+
+        # Lift bonus: once jaw is wrapped around cube, amplify cube-to-target reward
+        if d1 < 0.03 and d2 < 0.02:
+            lift_reward = 5.0 * max(0, 0.3 - d3)
+            reward += lift_reward
 
         if self.prev_action is not None:
             regularisation = np.linalg.norm(self.prev_action) * 10**-3
@@ -349,11 +376,23 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         object_target_diff = object_qpos[:3] - self.goal
 
         observation = np.concatenate(
-            [robot_qpos, robot_qvel, object_qpos, jaw_pos, object_jaw_diff, object_target_diff])
-        assert observation.shape == self.observation_space.shape, f"Expected obs shape {self.observation_space.shape} Actual shape {observation.shape}"
+            [
+                robot_qpos,
+                robot_qvel,
+                object_qpos,
+                jaw_pos,
+                object_jaw_diff,
+                object_target_diff,
+            ]
+        )
+        assert (
+            observation.shape == self.observation_space.shape
+        ), f"Expected obs shape {self.observation_space.shape} Actual shape {observation.shape}"
 
         jaw_top_pos = mujoco_utils.get_site_xpos(self.model, self.data, "jaw_top_site")
-        jaw_bottom_pos = mujoco_utils.get_site_xpos(self.model, self.data, "jaw_bottom_site")
+        jaw_bottom_pos = mujoco_utils.get_site_xpos(
+            self.model, self.data, "jaw_bottom_site"
+        )
         extra_observation = np.concatenate([jaw_top_pos, jaw_bottom_pos])
 
         return observation, extra_observation
@@ -386,5 +425,3 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         """
         if self.mujoco_renderer is not None:
             self.mujoco_renderer.close()
-
-
