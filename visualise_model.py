@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
 
 # SETTINGS
-model_folder = "PPO-01-fetch-santiago/33500000"  # no .zip
+model_folder = "PPO-02-fetch-santiago/44000000"  # no .zip
 
 extra_delay = 1  # seconds
 
