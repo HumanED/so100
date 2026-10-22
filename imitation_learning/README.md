@@ -72,6 +72,18 @@ lerobot-calibrate --teleop.type=so101_leader --teleop.port=/dev/tty.usbmodem5A7C
 Calibration is saved under `~/.cache/huggingface/lerobot/calibration/` by `id`, so use the same
 ids in every later command.
 
+Our calibrations for these two arms are in [`calibration/`](calibration/). To use the arms from
+another computer without recalibrating, copy them into LeRobot's calibration folder:
+
+```bash
+mkdir -p ~/.cache/huggingface/lerobot/calibration
+cp -R imitation_learning/calibration/. ~/.cache/huggingface/lerobot/calibration/
+```
+
+They only fit these two arms. Calibrating also writes each joint's zero point into the motors,
+so if anyone recalibrates, commit the new files here too, or everyone else's copies stop
+matching and LeRobot asks them to recalibrate.
+
 Things that went wrong for us:
 - Pressing Enter before moving every joint end to end. LeRobot stops with
   `Some motors have the same min and max values`, or saves ranges too narrow to use. Watch
