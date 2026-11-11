@@ -5,12 +5,20 @@ Usage (from the repo root):
 
 Each slider sets the target of one position actuator; the physics runs in real time, so the
 arm moves towards the targets and can push the cube around.
+
+Keyboard (hold a key to keep moving):
+    q / w   Rotation         o / p   Wrist_Roll
+    e / r   Pitch            [ / ]   Jaw
+    t / y   Elbow
+    u / i   Wrist_Pitch
+    1-9, 0  Speed (1 = slowest, 0 = fastest)
 """
 
 import argparse
 import time
 from pathlib import Path
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import mujoco
 from matplotlib.widgets import Button, Slider
@@ -18,6 +26,13 @@ from matplotlib.widgets import Button, Slider
 SCENE_PATH = Path(__file__).parent / "models" / "scene.xml"
 CAMERA_NAME = "wrist_camera"
 FPS = 30
+
+# (decrease, increase) key for each actuator, in actuator order.
+JOINT_KEYS = [("q", "w"), ("e", "r"), ("t", "y"), ("u", "i"), ("o", "p"), ("[", "]")]
+SPEED_KEYS = "1234567890"
+# Joint speed in rad/s at speed level 1; level n moves n times as fast (0 is level 10).
+BASE_SPEED = 0.2
+DEFAULT_SPEED_LEVEL = 5
 
 
 def main():
@@ -41,6 +56,12 @@ def main():
     def render(camera):
         renderer.update_scene(data, camera=camera, scene_option=scene_option)
         return renderer.render()
+
+    # Free up keys that matplotlib binds by default (q quits, o zooms, p pans, r resets the view).
+    used_keys = {key for pair in JOINT_KEYS for key in pair} | set(SPEED_KEYS)
+    for name, keys in mpl.rcParams.items():
+        if name.startswith("keymap."):
+            mpl.rcParams[name] = [key for key in keys if key not in used_keys]
 
     fig = plt.figure("SO-ARM100 wrist camera", figsize=(18, 10))
     image_bottom = 0.04 + 0.035 * model.nu
@@ -70,14 +91,45 @@ def main():
     reset_button = Button(fig.add_axes((0.85, 0.03, 0.1, 0.05)), "Reset")
     reset_button.on_clicked(reset)
 
+    # Keys currently held down; the timer moves their joints each tick.
+    held_keys = set()
+    speed_level = DEFAULT_SPEED_LEVEL
+    speed_text = fig.text(0.85, 0.1, "")
+
+    def show_speed():
+        speed_text.set_text(f"Speed {speed_level} ({BASE_SPEED * speed_level:.1f} rad/s)")
+
+    def on_key_press(event):
+        nonlocal speed_level
+        if event.key in SPEED_KEYS:
+            speed_level = SPEED_KEYS.index(event.key) + 1
+            show_speed()
+        else:
+            held_keys.add(event.key)
+
+    def on_key_release(event):
+        held_keys.discard(event.key)
+
+    show_speed()
+    fig.canvas.mpl_connect("key_press_event", on_key_press)
+    fig.canvas.mpl_connect("key_release_event", on_key_release)
+
     last_time = time.perf_counter()
 
     def update():
         nonlocal last_time
         now = time.perf_counter()
         # Catch the simulation up with wall-clock time, capped so a stall doesn't freeze the GUI.
-        sim_time = min(now - last_time, 0.1)
+        # A tick takes ~150 ms at 1280x960 (two renders plus the matplotlib redraw), so the cap
+        # has to sit above that or the arm and the keys run slower than real time.
+        sim_time = min(now - last_time, 0.25)
         last_time = now
+
+        for slider, (decrease_key, increase_key) in zip(sliders, JOINT_KEYS):
+            direction = (increase_key in held_keys) - (decrease_key in held_keys)
+            if direction:
+                step = direction * BASE_SPEED * speed_level * sim_time
+                slider.set_val(min(max(slider.val + step, slider.valmin), slider.valmax))
 
         data.ctrl[:] = [slider.val for slider in sliders]
         mujoco.mj_step(model, data, nstep=max(1, round(sim_time / model.opt.timestep)))
