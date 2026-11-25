@@ -105,6 +105,29 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         self._model_names = mujoco_utils.MujocoModelNames(self.model)
         self.model.vis.global_.offwidth = self.SCREEN_WIDTH
         self.model.vis.global_.offheight = self.SCREEN_HEIGHT
+        self._cache_obs_indices()
+
+    def _cache_obs_indices(self):
+        """
+        Look up qpos/qvel addresses once, so _get_obs() reads array slices instead of doing
+        ~14 name lookups per step (that was ~35% of step time). Same ordering as
+        mujoco_utils.robot_get_obs: every hinge/slide joint whose name starts with "robot", in model order.
+        """
+        robot_joint_ids = []
+        for name in self._model_names.joint_names:
+            if not name.startswith("robot"):
+                continue
+            jid = self._model_names.joint_name2id[name]
+            assert self.model.jnt_type[jid] in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE), name
+            robot_joint_ids.append(jid)
+        self._robot_qpos_idx = self.model.jnt_qposadr[robot_joint_ids].copy()
+        self._robot_qvel_idx = self.model.jnt_dofadr[robot_joint_ids].copy()
+
+        object_jid = self._model_names.joint_name2id["object:joint"]
+        assert self.model.jnt_type[object_jid] == mujoco.mjtJoint.mjJNT_FREE
+        object_adr = self.model.jnt_qposadr[object_jid]
+        self._object_qpos_slice = slice(object_adr, object_adr + 7)
+        self._jaw_site_id = self._model_names.site_name2id["jaw_site"]
 
     def reset(
             self,
@@ -291,16 +314,15 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
         object_target_diff:  3 numbers. Difference between position of the object and target location (object - target)
         self.goal:           3 numbers. Position (x,y,z) of the goal
         """
-        robot_qpos, robot_qvel = mujoco_utils.robot_get_obs(
-            self.model, self.data, self._model_names.joint_names
-        )
+        # Joint angles / velocities of the robot joints (indices cached in _cache_obs_indices)
+        robot_qpos = self.data.qpos[self._robot_qpos_idx]
+        robot_qvel = self.data.qvel[self._robot_qvel_idx]
 
-        # cube cartesian position (x,y,z) and quaternion orientation (x,y,z,w)
-        object_qpos = mujoco_utils.get_joint_qpos(self.model, self.data, "object:joint")
-
+        # cube cartesian position (x,y,z) and quaternion orientation (w,x,y,z)
+        object_qpos = self.data.qpos[self._object_qpos_slice]
 
         # Position of the jaw (x,y,z)
-        jaw_pos = mujoco_utils.get_site_xpos(self.model, self.data, "jaw_site")
+        jaw_pos = self.data.site_xpos[self._jaw_site_id]
 
         # Difference between Jaw and Cube position (dx, dy, dz)
         object_jaw_diff = object_qpos[:3] - jaw_pos
