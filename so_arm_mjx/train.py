@@ -100,13 +100,15 @@ def train(cfg: TrainConfig, verbose: bool = True):
                   f"eval reward {row.get('eval/episode_reward', float('nan')):8.2f} | "
                   f"grasp {row.get('eval/episode_grasp', float('nan')):.2f} | "
                   f"success {row.get('eval/episode_success', float('nan')):.2f} | {sps:,.0f} steps/s overall")
+        # Checked here, not in policy_params_fn: Brax calls policy_params_fn -> checkpoint save -> eval -> progress_fn,
+        # so stopping here keeps the last checkpoint and eval row.
+        if cfg.time_limit_hours is not None and time.time() - t0 > cfg.time_limit_hours * 3600:
+            raise _TimeLimit()
 
     def policy_params_fn(step, make_policy, params):
         last["step"], last["params"] = step, params
         if step > 0:
             brax_model.save_params(os.path.join(models_dir, f"{step}.pkl"), params)
-        if cfg.time_limit_hours is not None and time.time() - t0 > cfg.time_limit_hours * 3600:
-            raise _TimeLimit()
 
     try:
         make_inference_fn, params, metrics = ppo.train(
