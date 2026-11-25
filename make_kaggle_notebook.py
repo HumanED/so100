@@ -1,0 +1,393 @@
+"""
+Builds kaggle_train.ipynb: a self-contained Kaggle notebook that trains PPO on SoFetchEnv.
+
+The so_arm_rl package (python + MuJoCo XML + STL meshes) is embedded in the notebook as a
+base64 tarball, so nothing needs uploading to Kaggle besides the notebook itself.
+Re-run this script whenever you change the environment code:
+
+    python make_kaggle_notebook.py
+"""
+import base64
+import io
+import json
+import os
+import tarfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PKG_DIR = os.path.join(HERE, "so_arm_rl")
+OUT = os.path.join(HERE, "kaggle_train.ipynb")
+
+
+def pack_package() -> str:
+    def keep(ti: tarfile.TarInfo):
+        name = ti.name
+        if "__pycache__" in name or ".egg-info" in name or name.endswith((".pyc", ".DS_Store")):
+            return None
+        return ti
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        tar.add(PKG_DIR, arcname="so_arm_rl", filter=keep)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def md(src):
+    return {"cell_type": "markdown", "metadata": {}, "source": src.strip("\n")}
+
+
+def code(src):
+    return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": src.strip("\n")}
+
+
+cells = [
+    md("""
+# SO-100 Fetch: PPO training on Kaggle
+
+Trains PPO (stable-baselines3) on `SoFetchEnv`, using the same wrappers as `train_parallel.py`,
+so the saved `.zip` models load with `visualise_model.py` without changes.
+
+**Kaggle settings (right sidebar)**
+- **Internet: On** (needed for `pip install`)
+- **Accelerator: GPU (P100 or T4)**. The notebook detects CUDA and runs the PPO updates on the GPU, using larger minibatches so the GPU is actually busy.
+  Only one GPU is used, so "T4 x2" gives no extra speed. MuJoCo simulation still runs on the 4 CPU cores and is usually the bottleneck,
+  so the GPU mostly speeds up the update phase. That helps more with a bigger network (`NET_ARCH`) or bigger batches.
+  GPU sessions count against your weekly Kaggle GPU quota (about 30 h). If you run out, set the accelerator to None and the notebook falls back to CPU.
+- Use **Save Version → Save & Run All (Commit)** so training keeps running in the background with the browser closed (12 h limit).
+  The models, TensorBoard logs and a `results.zip` then appear under the version's **Output** tab.
+
+**Resuming:** add a previous run's output (or any uploaded model `.zip`) as an input dataset, then set `RESUME_FROM`.
+"""),
+    code("""
+%pip install -q "stable-baselines3==2.5.0" "gymnasium==1.0.0" "mujoco==3.3.5" tensorboard
+"""),
+    md("## Config"),
+    code("""
+import os
+
+RUN_NAME = "PPO-carl-35-sofetch-kaggle"   # names the model + log folders
+TOTAL_TIMESTEPS = 20_000_000              # upper bound; time limit below usually stops it first
+TIME_LIMIT_HOURS = 11.25                   # Kaggle kills sessions at 12 h, so leave time to save + zip
+SAVE_INTERVAL = 250_000                   # checkpoint every N timesteps...
+START_SAVING = 500_000                    # ...once past this many
+N_ENVS = os.cpu_count()                   # parallel envs (Kaggle CPU = 4 cores)
+SEED = 1
+
+# Resume: path to a model .zip, e.g. "/kaggle/input/my-prev-run/models/PPO-carl-35-sofetch-kaggle/5000000.zip"
+# Or a directory, in which case the checkpoint with the highest timestep number is used.
+RESUME_FROM = None
+
+import torch
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if DEVICE == "cuda":
+    print("GPU:", torch.cuda.get_device_name(0))
+else:
+    print("No GPU detected, training on CPU (turn on a GPU accelerator in the sidebar to use one)")
+
+# Policy/value network sizes. None = SB3 default (64, 64). A bigger net, e.g. dict(pi=[256, 256], vf=[256, 256]),
+# is where the GPU starts to pay off, but models will then differ in architecture from earlier runs.
+NET_ARCH = None
+
+# PPO hyperparameters (SB3 defaults except batch_size; tweak freely)
+PPO_KWARGS = dict(
+    learning_rate=3e-4,
+    n_steps=2048,       # per env -> rollout size = n_steps * N_ENVS
+    batch_size=512 if DEVICE == "cuda" else 64,  # tiny minibatches leave a GPU idle; 512 is still 16 minibatches/epoch at 4 envs
+    n_epochs=10,
+    gamma=0.99,
+)
+if NET_ARCH is not None:
+    PPO_KWARGS["policy_kwargs"] = dict(net_arch=NET_ARCH)
+
+# The env never resets grasp_reward / target_reached_reward in reset(), so each worker
+# can only earn those bonuses ONCE in its whole lifetime. Set True to re-arm them every episode.
+# Left False so results stay comparable with earlier runs.
+FIX_ONE_TIME_BONUS_BUG = False
+
+RECORD_VIDEO = True                       # record an evaluation video at the end (may fail without EGL)
+
+WORK = "/kaggle/working" if os.path.isdir("/kaggle/working") else os.path.abspath("kaggle_out")
+MODELS_DIR = os.path.join(WORK, "models")
+LOGS_DIR = os.path.join(WORK, "logs")
+os.makedirs(MODELS_DIR, exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
+print("Output dir:", WORK, "| envs:", N_ENVS, "| device:", DEVICE)
+"""),
+    md("## Install the `so_arm_rl` environment package (embedded)"),
+    code(f"""
+import base64, io, sys, tarfile
+
+PKG_B64 = "{pack_package()}"
+
+SRC_DIR = os.path.join(WORK, "src") if WORK.startswith("/kaggle") else os.path.abspath("kaggle_src")
+os.makedirs(SRC_DIR, exist_ok=True)
+with tarfile.open(fileobj=io.BytesIO(base64.b64decode(PKG_B64)), mode="r:gz") as tar:
+    tar.extractall(SRC_DIR, **({{"filter": "data"}} if hasattr(tarfile, "data_filter") else {{}}))
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+# Subprocess workers also need to import it
+os.environ["PYTHONPATH"] = SRC_DIR + os.pathsep + os.environ.get("PYTHONPATH", "")
+print("Extracted to", SRC_DIR)
+"""),
+    md("## Env factory + callbacks"),
+    code("""
+import glob, re, time
+import numpy as np
+import matplotlib.pyplot as plt
+from gymnasium.wrappers import NormalizeObservation, TransformObservation
+from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
+
+from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
+
+
+class PatchedSoFetchEnv(SoFetchEnv):
+    \"\"\"Re-arms the one-time grasp / target bonuses on every reset.\"\"\"
+    def reset(self, *, seed=None, options=None):
+        self.grasp_reward = 20
+        self.target_reached_reward = 30
+        return super().reset(seed=seed, options=options)
+
+
+def clip_observation(obs):
+    \"\"\"Clip to within 5 std of the mean (section D.1 of the OpenAI paper), same as train_parallel.py\"\"\"
+    return np.clip(obs, a_min=obs.mean() - 5 * obs.std(), a_max=obs.mean() + 5 * obs.std())
+
+
+def make_env(rank=0, render_mode=None, fix_bonus=FIX_ONE_TIME_BONUS_BUG):
+    def _init():
+        env_cls = PatchedSoFetchEnv if fix_bonus else SoFetchEnv
+        env = env_cls(render_mode=render_mode)
+        env = NormalizeObservation(env)
+        env = TransformObservation(env, clip_observation, env.observation_space)
+        env = Monitor(env)
+        env.reset(seed=SEED + rank)
+        return env
+    return _init
+
+
+class TensorboardCallback(BaseCallback):
+    \"\"\"Logs mean per-episode sub-rewards (rew_*) of env 0, same as train_parallel.py\"\"\"
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self.episode_count = 0
+        self.sub_rews_cumul, self.sub_rews_buffer = {}, {}
+        self.buffer_idx = 0
+        self.ignore_reset_flag = True
+
+    def _on_training_start(self):
+        self.max_t = self.training_env.get_attr("MAX_TIMESTEPS")[0]
+        for k in self.training_env.get_attr("info")[0]:
+            if k.startswith("rew_"):
+                self.sub_rews_cumul[k] = 0
+                self.sub_rews_buffer[k] = np.zeros(self.max_t)
+
+    def _on_step(self):
+        info = self.training_env.get_attr("info")[0]
+        if info["reset_flag"] and not self.ignore_reset_flag:
+            self.episode_count += 1
+            for k in self.sub_rews_cumul:
+                self.sub_rews_buffer[k][self.buffer_idx] = self.sub_rews_buffer[k][self.buffer_idx - 1]
+                self.sub_rews_cumul[k] += np.sum(self.sub_rews_buffer[k])
+                self.sub_rews_buffer[k] = np.zeros(self.max_t)
+            self.buffer_idx = 0
+        else:
+            self.ignore_reset_flag = False
+            for k in self.sub_rews_cumul:
+                if k in info and self.buffer_idx < self.max_t:
+                    self.sub_rews_buffer[k][self.buffer_idx] = info[k]
+            self.buffer_idx += 1
+        return True
+
+    def _on_rollout_end(self):
+        for k, v in self.sub_rews_cumul.items():
+            self.logger.record(f"rollout/{k}_mean", float(v) / self.episode_count if self.episode_count else 0.0)
+            self.sub_rews_cumul[k] = 0
+        self.episode_count = 0
+
+
+class CheckpointAndTimeLimit(BaseCallback):
+    \"\"\"Saves every SAVE_INTERVAL timesteps and stops cleanly before the Kaggle time limit.\"\"\"
+    def __init__(self, save_dir, interval, start_saving, time_limit_s):
+        super().__init__()
+        self.save_dir, self.interval, self.start_saving = save_dir, interval, start_saving
+        self.time_limit_s = time_limit_s
+        self.t0 = time.time()
+        self.next_save = None
+
+    def _on_training_start(self):
+        os.makedirs(self.save_dir, exist_ok=True)
+        # first multiple of interval past current timestep count (works when resuming)
+        self.next_save = (self.num_timesteps // self.interval + 1) * self.interval
+
+    def _on_step(self):
+        if self.num_timesteps >= self.next_save:
+            if self.num_timesteps >= self.start_saving:
+                path = os.path.join(self.save_dir, str(self.next_save))
+                self.model.save(path)
+                elapsed = (time.time() - self.t0) / 3600
+                print(f"[ckpt] {self.next_save:,} steps -> {path}.zip  ({elapsed:.2f} h elapsed)")
+            self.next_save += self.interval
+        if time.time() - self.t0 > self.time_limit_s:
+            print(f"[time limit] stopping at {self.num_timesteps:,} timesteps")
+            return False
+        return True
+"""),
+    md("## Smoke test the environment"),
+    code("""
+_env = make_env()()
+obs, info = _env.reset()
+for _ in range(5):
+    obs, r, term, trunc, info = _env.step(_env.action_space.sample())
+print("obs shape", obs.shape, "| reward", round(float(r), 4), "| action space", _env.action_space)
+_env.close()
+
+# quick throughput check
+_env = make_env()()
+_env.reset()
+t = time.time()
+for _ in range(500):
+    _, _, term, trunc, _ = _env.step(_env.action_space.sample())
+    if term or trunc:
+        _env.reset()
+sps = 500 / (time.time() - t)
+_env.close()
+print(f"~{sps:.0f} env steps/s per core -> roughly {sps * N_ENVS * 3600 / 1e6:.1f}M steps/hour with {N_ENVS} envs (before PPO update overhead)")
+"""),
+    md("## Train"),
+    code("""
+def resolve_resume(path):
+    if path is None:
+        return None
+    if os.path.isdir(path):
+        zips = glob.glob(os.path.join(path, "**", "*.zip"), recursive=True)
+        nums = [(int(m.group(1)), z) for z in zips if (m := re.match(r"(\\d+)", os.path.basename(z)))]
+        if not nums:
+            raise FileNotFoundError(f"No numbered checkpoints in {path}")
+        return max(nums)[1]
+    return path
+
+run_models_dir = os.path.join(MODELS_DIR, RUN_NAME)
+resume_path = resolve_resume(RESUME_FROM)
+if resume_path is None and glob.glob(os.path.join(run_models_dir, "*.zip")):
+    raise RuntimeError(f"{run_models_dir} already has checkpoints; change RUN_NAME or set RESUME_FROM")
+
+env = SubprocVecEnv([make_env(i) for i in range(N_ENVS)]) if N_ENVS > 1 else DummyVecEnv([make_env(0)])
+
+if resume_path:
+    print("Resuming from", resume_path)
+    model = PPO.load(resume_path, env=env, device=DEVICE, seed=SEED, tensorboard_log=LOGS_DIR)
+else:
+    model = PPO("MlpPolicy", env, device=DEVICE, seed=SEED, tensorboard_log=LOGS_DIR, verbose=1, **PPO_KWARGS)
+
+callbacks = CallbackList([
+    TensorboardCallback(),
+    CheckpointAndTimeLimit(run_models_dir, SAVE_INTERVAL, START_SAVING, TIME_LIMIT_HOURS * 3600),
+])
+
+t0 = time.time()
+try:
+    model.learn(
+        total_timesteps=TOTAL_TIMESTEPS,
+        callback=callbacks,
+        tb_log_name=RUN_NAME,
+        reset_num_timesteps=resume_path is None,
+        progress_bar=False,
+    )
+except KeyboardInterrupt:
+    print("Interrupted, saving what we have")
+finally:
+    final_path = os.path.join(run_models_dir, f"{model.num_timesteps}_final")
+    model.save(final_path)
+    env.close()
+    print(f"Saved final model -> {final_path}.zip | {model.num_timesteps:,} timesteps in {(time.time()-t0)/3600:.2f} h")
+"""),
+    md("## Training curves"),
+    code("""
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+ev_files = sorted(glob.glob(os.path.join(LOGS_DIR, f"{RUN_NAME}_*", "events.*")))
+if not ev_files:
+    print("No TensorBoard logs found")
+else:
+    ea = EventAccumulator(os.path.dirname(ev_files[-1])); ea.Reload()
+    tags = [t for t in ["rollout/ep_rew_mean", "rollout/rew_jaw_center_to_object_mean",
+                        "rollout/rew_object_to_target_mean", "train/value_loss"] if t in ea.Tags()["scalars"]]
+    fig, axes = plt.subplots(1, len(tags), figsize=(5 * len(tags), 3.5), squeeze=False)
+    for ax, tag in zip(axes[0], tags):
+        s = ea.Scalars(tag)
+        ax.plot([e.step for e in s], [e.value for e in s])
+        ax.set_title(tag); ax.set_xlabel("timesteps"); ax.grid(alpha=0.3)
+    plt.tight_layout(); plt.savefig(os.path.join(WORK, f"{RUN_NAME}_curves.png"), dpi=120); plt.show()
+"""),
+    md("## Evaluate (+ optional video)"),
+    code("""
+eval_model = PPO.load(final_path, device=DEVICE)
+returns, successes, frames = [], [], []
+
+if RECORD_VIDEO:
+    os.environ.setdefault("MUJOCO_GL", "egl")
+try:
+    eval_env = make_env(rank=100, render_mode="rgb_array" if RECORD_VIDEO else None)()
+except Exception as e:
+    print("Render env failed, evaluating without video:", e)
+    RECORD_VIDEO = False
+    eval_env = make_env(rank=100)()
+
+for ep in range(5):
+    obs, info = eval_env.reset()
+    done, ep_ret = False, 0.0
+    while not done:
+        action, _ = eval_model.predict(obs, deterministic=True)
+        obs, r, term, trunc, info = eval_env.step(action)
+        ep_ret += r
+        done = term or trunc
+        if RECORD_VIDEO and ep == 0:
+            try:
+                frames.append(eval_env.render())
+            except Exception as e:
+                print("Rendering failed, skipping video:", e); RECORD_VIDEO = False
+    returns.append(ep_ret); successes.append(info.get("is_success", 0))
+eval_env.close()
+print(f"Mean return {np.mean(returns):.2f} | success rate {np.mean(successes):.0%}")
+
+if frames:
+    import imageio
+    vid = os.path.join(WORK, f"{RUN_NAME}_eval.mp4")
+    imageio.mimsave(vid, frames, fps=int(round(1 / info["dt"])))
+    print("Video saved ->", vid)
+"""),
+    md("## Package outputs\n\n`results.zip` has `models/` and `logs/`. Download it from the Output tab and unzip it into the repo root, so `visualise_model.py` can find the models."),
+    code("""
+# zip only models + logs (not the extracted source)
+import zipfile
+zip_path = os.path.join(WORK, "results.zip")
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    for sub in ("models", "logs"):
+        for root, _, files in os.walk(os.path.join(WORK, sub)):
+            for f in files:
+                full = os.path.join(root, f)
+                zf.write(full, os.path.relpath(full, WORK))
+print("Wrote", zip_path, f"({os.path.getsize(zip_path)/1e6:.1f} MB)")
+for p in sorted(glob.glob(os.path.join(run_models_dir, "*.zip"))):
+    print("  ", os.path.relpath(p, WORK))
+"""),
+]
+
+for i, c in enumerate(cells):
+    c["id"] = f"cell-{i}"
+
+nb = {
+    "cells": cells,
+    "metadata": {
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python"},
+    },
+    "nbformat": 4,
+    "nbformat_minor": 5,
+}
+
+with open(OUT, "w") as f:
+    json.dump(nb, f, indent=1)
+print(f"Wrote {OUT} ({os.path.getsize(OUT)/1e6:.2f} MB)")
