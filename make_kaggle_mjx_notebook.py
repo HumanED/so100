@@ -4,7 +4,13 @@ version of the fetch task. so_arm_mjx, visualise_mjx.py and the scene XML/STLs a
 base64 tarball. Re-run after changing any of them:
 
     python make_kaggle_mjx_notebook.py
+
+Kaggle's API (kaggle kernels push) rejects notebooks over 1 MB, and the embedded one is ~1.2 MB. For API
+pushes, build a slim notebook that git-clones the code from GitHub instead (the branch must be pushed):
+
+    python make_kaggle_mjx_notebook.py --github carlgpu      # -> kaggle_train_mjx_github.ipynb
 """
+import argparse
 import base64
 import io
 import json
@@ -12,7 +18,12 @@ import os
 import tarfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "kaggle_train_mjx.ipynb")
+REPO_URL = "https://github.com/HumanED/so100.git"
+_args = argparse.ArgumentParser()
+_args.add_argument("--github", metavar="BRANCH", default=None,
+                   help="clone code from this GitHub branch instead of embedding it")
+ARGS = _args.parse_args()
+OUT = os.path.join(HERE, "kaggle_train_mjx_github.ipynb" if ARGS.github else "kaggle_train_mjx.ipynb")
 EMBED = ["so_arm_mjx", "visualise_mjx.py", os.path.join("so_arm_rl", "envs", "resources")]
 
 
@@ -70,8 +81,17 @@ print("JAX", jax.__version__, "devices:", jax.devices())
 if jax.default_backend() != "gpu":
     print("WARNING: no GPU visible to JAX. Turn on a GPU accelerator. On CPU this will be extremely slow.")
 """),
-    md("## Unpack the embedded code"),
+    md(f"## Get the code (clone `{ARGS.github}` from GitHub)") if ARGS.github else md("## Unpack the embedded code"),
     code(f"""
+import shutil, subprocess, sys
+WORK = "/kaggle/working" if os.path.isdir("/kaggle/working") else os.path.abspath("kaggle_mjx_out")
+SRC = os.path.join(WORK, "src")
+shutil.rmtree(SRC, ignore_errors=True)
+subprocess.run(["git", "clone", "--depth", "1", "-b", "{ARGS.github}", "{REPO_URL}", SRC], check=True)
+commit = subprocess.run(["git", "-C", SRC, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+sys.path.insert(0, SRC)
+print("Code in", SRC, "at commit", commit)
+""") if ARGS.github else code(f"""
 import base64, io, sys, tarfile
 PKG_B64 = "{pack()}"
 WORK = "/kaggle/working" if os.path.isdir("/kaggle/working") else os.path.abspath("kaggle_mjx_out")
