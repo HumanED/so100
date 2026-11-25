@@ -46,12 +46,15 @@ cells = [
 Trains PPO (stable-baselines3) on `SoFetchEnv`, using the same wrappers as `train_parallel.py`,
 so the saved `.zip` models load with `visualise_model.py` without changes.
 
+By default all envs run in one process with `SoFetchVecEnv` (MuJoCo's multithreaded rollout, no worker processes).
+It's about 1.7x faster than one process per env, and its observations/rewards match the wrapped `SoFetchEnv`.
+Set `VEC_ENV = "subproc"` for the original `SubprocVecEnv`.
+
 **Kaggle settings (right sidebar)**
 - **Internet: On** (needed for `pip install`)
-- **Accelerator: GPU (P100 or T4)**. The notebook detects CUDA and runs the PPO updates on the GPU, using larger minibatches so the GPU is actually busy.
-  Only one GPU is used, so "T4 x2" gives no extra speed. MuJoCo simulation still runs on the 4 CPU cores and is usually the bottleneck,
-  so the GPU mostly speeds up the update phase. That helps more with a bigger network (`NET_ARCH`) or bigger batches.
-  GPU sessions count against your weekly Kaggle GPU quota (about 30 h). If you run out, set the accelerator to None and the notebook falls back to CPU.
+- **Accelerator: None (CPU)**, recommended. SB3 runs the policy once per env step, and with this small network
+  each GPU round trip costs more than it saves (on Apple Metal it was ~10x slower). CPU sessions also don't use GPU quota.
+  To try a GPU anyway (e.g. with a much bigger `NET_ARCH`), turn one on and set `USE_GPU = True`.
 - Use **Save Version → Save & Run All (Commit)** so training keeps running in the background with the browser closed (12 h limit).
   The models, TensorBoard logs and a `results.zip` then appear under the version's **Output** tab.
 
@@ -69,7 +72,9 @@ TOTAL_TIMESTEPS = 20_000_000              # upper bound; time limit below usuall
 TIME_LIMIT_HOURS = 11.25                   # Kaggle kills sessions at 12 h, so leave time to save + zip
 SAVE_INTERVAL = 250_000                   # checkpoint every N timesteps...
 START_SAVING = 500_000                    # ...once past this many
-N_ENVS = os.cpu_count()                   # parallel envs (Kaggle CPU = 4 cores)
+VEC_ENV = "single_process"                # "single_process" (SoFetchVecEnv, faster) or "subproc" (original)
+N_ENVS = 32 if VEC_ENV == "single_process" else os.cpu_count()  # Kaggle CPU sessions have 4 cores
+ROLLOUT_SIZE = 16384                      # env steps per PPO update (same as train_parallel.py); n_steps = ROLLOUT_SIZE // N_ENVS
 SEED = 1
 
 # Resume: path to a model .zip, e.g. "/kaggle/input/my-prev-run/models/PPO-carl-35-sofetch-kaggle/5000000.zip"
@@ -77,11 +82,9 @@ SEED = 1
 RESUME_FROM = None
 
 import torch
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-if DEVICE == "cuda":
-    print("GPU:", torch.cuda.get_device_name(0))
-else:
-    print("No GPU detected, training on CPU (turn on a GPU accelerator in the sidebar to use one)")
+USE_GPU = False                           # see the note at the top; CPU is faster for the default network
+DEVICE = "cuda" if USE_GPU and torch.cuda.is_available() else "cpu"
+print("PPO device:", DEVICE, f"({torch.cuda.get_device_name(0)})" if DEVICE == "cuda" else "")
 
 # Policy/value network sizes. None = SB3 default (64, 64). A bigger net, e.g. dict(pi=[256, 256], vf=[256, 256]),
 # is where the GPU starts to pay off, but models will then differ in architecture from earlier runs.
@@ -90,7 +93,7 @@ NET_ARCH = None
 # PPO hyperparameters (SB3 defaults except batch_size; tweak freely)
 PPO_KWARGS = dict(
     learning_rate=3e-4,
-    n_steps=2048,       # per env -> rollout size = n_steps * N_ENVS
+    n_steps=max(1, ROLLOUT_SIZE // N_ENVS),  # per env
     batch_size=512 if DEVICE == "cuda" else 64,  # tiny minibatches leave a GPU idle; 512 is still 16 minibatches/epoch at 4 envs
     n_epochs=10,
     gamma=0.99,
@@ -136,6 +139,7 @@ import matplotlib.pyplot as plt
 from gymnasium.wrappers import NormalizeObservation, TransformObservation
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from so_arm_rl.envs.fetch.so_arm_fetch_vec_env import SoFetchVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 
@@ -243,17 +247,20 @@ for _ in range(5):
 print("obs shape", obs.shape, "| reward", round(float(r), 4), "| action space", _env.action_space)
 _env.close()
 
-# quick throughput check
-_env = make_env()()
-_env.reset()
-t = time.time()
-for _ in range(500):
-    _, _, term, trunc, _ = _env.step(_env.action_space.sample())
-    if term or trunc:
-        _env.reset()
-sps = 500 / (time.time() - t)
-_env.close()
-print(f"~{sps:.0f} env steps/s per core -> roughly {sps * N_ENVS * 3600 / 1e6:.1f}M steps/hour with {N_ENVS} envs (before PPO update overhead)")
+# quick throughput check of the vectorised env used for training (simulation only)
+if VEC_ENV == "single_process":
+    _venv = SoFetchVecEnv(N_ENVS)
+    _venv.reset()
+    _a = np.stack([_venv.action_space.sample() for _ in range(N_ENVS)])
+    for _ in range(20):
+        _venv.step(_a)
+    t = time.time()
+    for _ in range(200):
+        _venv.step(_a)
+    sps = 200 * N_ENVS / (time.time() - t)
+    _venv.close()
+    print(f"SoFetchVecEnv: {sps:,.0f} env steps/s with {N_ENVS} envs on {os.cpu_count()} cores "
+          f"(~{sps * 3600 / 1e6:.0f}M/hour before PPO overhead; expect roughly a third of that end to end)")
 """),
     md("## Train"),
     code("""
@@ -273,11 +280,15 @@ resume_path = resolve_resume(RESUME_FROM)
 if resume_path is None and glob.glob(os.path.join(run_models_dir, "*.zip")):
     raise RuntimeError(f"{run_models_dir} already has checkpoints; change RUN_NAME or set RESUME_FROM")
 
-env = SubprocVecEnv([make_env(i) for i in range(N_ENVS)]) if N_ENVS > 1 else DummyVecEnv([make_env(0)])
+if VEC_ENV == "single_process":
+    env = SoFetchVecEnv(N_ENVS, fix_bonus_bug=FIX_ONE_TIME_BONUS_BUG)
+else:
+    env = SubprocVecEnv([make_env(i) for i in range(N_ENVS)]) if N_ENVS > 1 else DummyVecEnv([make_env(0)])
 
 if resume_path:
     print("Resuming from", resume_path)
-    model = PPO.load(resume_path, env=env, device=DEVICE, seed=SEED, tensorboard_log=LOGS_DIR)
+    model = PPO.load(resume_path, env=env, device=DEVICE, seed=SEED, tensorboard_log=LOGS_DIR,
+                     custom_objects={"n_steps": PPO_KWARGS["n_steps"]})
 else:
     model = PPO("MlpPolicy", env, device=DEVICE, seed=SEED, tensorboard_log=LOGS_DIR, verbose=1, **PPO_KWARGS)
 
