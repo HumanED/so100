@@ -43,7 +43,7 @@ class Timing(BaseCallback):
 
     def _on_training_start(self):
         if not hasattr(self, "t0"):   # learn() is called repeatedly; time from the first call
-            self.t0 = time.time()
+            self.t0, self.step0 = time.time(), self.num_timesteps
 
     def _on_rollout_start(self):
         self.t_start = time.time()
@@ -54,7 +54,7 @@ class Timing(BaseCallback):
             row = dict(minutes=round((time.time() - self.t0) / 60, 2), steps=self.num_timesteps,
                        ep_rew_mean=float(np.mean([e["r"] for e in self.model.ep_info_buffer])),
                        grasp_rate=self.grasps / self.eps, success_rate=self.succ / self.eps,
-                       steps_per_s=round(self.num_timesteps / (time.time() - self.t0)))
+                       steps_per_s=round((self.num_timesteps - self.step0) / (time.time() - self.t0)))
             self.rows.append(row)
             print(row, flush=True)
             import pandas as pd

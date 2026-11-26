@@ -70,8 +70,9 @@ class SoFetchWarpVecEnv(VecEnv):
             idx = np.flatnonzero(done_np)
             term = info["terminal_obs"].cpu().numpy()
             trunc = info["timeout"][done].cpu().numpy()
-            succ = (info["episode"]["success"] > 0).cpu().numpy()
-            grasp = (info["episode"]["grasp"] > 0).cpu().numpy()
+            zero = torch.zeros(len(idx), device=self.device)
+            succ = (info["episode"].get("success", zero) > 0).cpu().numpy()
+            grasp = (info["episode"].get("grasp", zero) > 0).cpu().numpy()
             for j, i in enumerate(idx):
                 infos[i] = {"terminal_observation": term[j], "TimeLimit.truncated": bool(trunc[j]),
                             "is_success": int(succ[j]), "grasped": int(grasp[j])}
@@ -82,18 +83,19 @@ class SoFetchWarpVecEnv(VecEnv):
         if done0:
             self._info0 = _reset_info()
             return
-        m = {k: float(v[0]) for k, v in self.env.last_metrics.items()}
+        m = {k: float(v[0]) for k, v in self.env.last_metrics.items()}   # custom rewards may omit some keys
+        jaw, tgt = m.get("rew_jaw_center_to_object", 0.0), m.get("rew_object_to_target", 0.0)
         i = self._info0
         i["reset_flag"] = False
         i["total_timesteps"] = int(self.env.t[0])
-        i["rew_jaw_center_to_object"] = m["rew_jaw_center_to_object"]
-        i["rew_object_to_target"] = m["rew_object_to_target"]
-        i["rew_grasp"] = 20 if m["grasp"] else 0
-        i["rew_success"] = 30 if m["success"] else 0
-        i["rew_jaw_center_to_object_prop"] = 0.5 * m["rew_jaw_center_to_object"]
-        i["rew_object_to_target_prop"] = 0.5 * m["rew_object_to_target"]
+        i["rew_jaw_center_to_object"] = jaw
+        i["rew_object_to_target"] = tgt
+        i["rew_grasp"] = 20 if m.get("grasp") else 0
+        i["rew_success"] = 30 if m.get("success") else 0
+        i["rew_jaw_center_to_object_prop"] = 0.5 * jaw
+        i["rew_object_to_target_prop"] = 0.5 * tgt
         i["rew_jaw_open_prop"] = m.get("rew_jaw_open", 0.0)
-        if m["success"]:
+        if m.get("success"):
             i["is_success"] = 1
         i["TimeLimit.truncated"] = False
 
