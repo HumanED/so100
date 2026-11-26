@@ -1,8 +1,8 @@
 """
 Physics setups ("cases") for MuJoCo Warp, and a batched stepper used by the benchmark and the training env.
 
-Cases (all use so_arm_mjx.model, so the scene is the same one SoFetchEnv loads):
-  simplified   simplified collision model (see so_arm_mjx/fetch_env.py), GPU solver, 10 x 4 ms substeps
+Cases (all build from scene.py, i.e. the same scene.xml SoFetchEnv loads):
+  simplified   simplified collision model (see scene.py), GPU solver, 10 x 4 ms substeps
   filtered     original collision meshes, no arm-vs-arm checks, GPU solver, 10 x 4 ms substeps
   full         ALL original collisions, GPU solver (pyramidal cone, `iterations`), 10 x 4 ms substeps
   original     the untouched scene.xml exactly as SoFetchEnv runs it (elliptic cone, 100 iterations), 20 x 2 ms
@@ -13,7 +13,7 @@ from typing import Optional
 import mujoco
 import numpy as np
 
-from so_arm_mjx.model import SCENE_XML, FetchConfig, build_mj_model, settled_initial_state
+from .scene import SCENE_XML, FetchConfig, build_mj_model, settled_initial_state
 
 CASES = ("simplified", "filtered", "full", "original")
 

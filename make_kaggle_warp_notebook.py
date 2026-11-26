@@ -2,14 +2,14 @@
 Builds kaggle_train_warp.ipynb: Kaggle GPU notebook that trains the MuJoCo Warp version (so_arm_warp).
 It git-clones the code (so it stays under Kaggle's 1 MB API limit and always runs the pushed branch):
 
-    python make_kaggle_warp_notebook.py [--branch carlwarp]
+    python make_kaggle_warp_notebook.py [--branch warp-training]
 """
 import argparse
 import json
 import os
 
 p = argparse.ArgumentParser()
-p.add_argument("--branch", default="carlwarp")
+p.add_argument("--branch", default="warp-training")
 a = p.parse_args()
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "kaggle_train_warp.ipynb")
@@ -40,6 +40,8 @@ Download `results.zip` from the version's Output tab.
 **Physics (`case`):** `full` = all original collision shapes with a cheaper solver (default), `original` = exactly the
 CPU env's physics (slower), `filtered` / `simplified` = cheaper collisions (fastest). See `so_arm_warp/physics.py`.
 
+**Send jobs from the command line instead:** `python tools/kaggle_job.py submit ...` (see docs/KAGGLE.md).
+
 **Watch a trained policy locally:** `python -m so_arm_warp.play results/<run>/model_final.pt` (CPU, no GPU needed).
 """),
     code(f"""
@@ -50,7 +52,7 @@ EXPERIMENTS = [                   # one per GPU; remove one to train a single ru
     dict(run_name="carl-default-1", reward="default", case="full"),
     dict(run_name="carl-padmid-1", reward="pad_midpoint", case="full"),
 ]
-RESUME = {{}}                      # e.g. {{"carl-default-1": "/kaggle/input/<prev-output>/carl-default-1/model_final.pt"}}
+RESUME = {{}}                      # e.g. {{"carl-default-1": "/kaggle/input/<prev-job>/results/carl-default-1/model_final.pt"}}
 """),
     code("""
 %pip install -q "mujoco==4.0.1" "mujoco-warp==4.0.1"
@@ -73,8 +75,11 @@ for i, ex in enumerate(EXPERIMENTS[:n_gpu]):
     cmd = [sys.executable, "-m", "so_arm_warp.train", "--run-name", ex["run_name"], "--reward", ex["reward"],
            "--case", ex.get("case", "full"), "--num-envs", str(NUM_ENVS), "--hours", str(HOURS),
            "--out-dir", OUT, "--device", f"cuda:{i}"]
-    if ex["run_name"] in RESUME:
-        cmd += ["--resume", RESUME[ex["run_name"]]]
+    ck = RESUME.get(ex["run_name"])
+    if ck and os.path.exists(ck):
+        cmd += ["--resume", ck]
+    elif ck:
+        print("no checkpoint at", ck, "- starting", ex["run_name"], "from scratch")
     log = open(os.path.join(OUT, f"{ex['run_name']}.stdout"), "w")
     procs.append((ex["run_name"], subprocess.Popen(cmd, cwd=SRC, stdout=log, stderr=subprocess.STDOUT), log))
     print("started", ex["run_name"], "on", f"cuda:{i}")

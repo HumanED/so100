@@ -1,35 +1,51 @@
 # Reinforcement learning on the SO-100 arm
 
-See the HumanED notion page for installation instructions
+The task (`SoFetchEnv`): the SO-100 arm reaches for a cube, grasps it and moves it to a target, simulated in
+MuJoCo. See the HumanED notion page for installation instructions.
 
-## GPU training (MuJoCo MJX + Brax)
+## How to train
 
-`so_arm_mjx/` is a JAX/MJX port of `SoFetchEnv` that runs thousands of environments in parallel on a GPU
-and trains with Brax PPO. See the docstring in `so_arm_mjx/fetch_env.py` for how it differs from the CPU env.
+| | Where | Speed | Docs |
+|---|---|---|---|
+| **Recommended** | **MuJoCo Warp + PyTorch PPO** on Kaggle's free T4 GPUs (`so_arm_warp/`) | ~27× the original setup per experiment, two experiments per notebook | [docs/KAGGLE.md](docs/KAGGLE.md) |
+| Free fallback | Stable-Baselines3 on a laptop or a Kaggle CPU session (`train_parallel.py`, `SoFetchVecEnv`) | ~1.4–3× the original setup, exact physics, no quota | below |
 
-- **Kaggle:** upload `kaggle_train_mjx.ipynb` (self-contained), set Accelerator to GPU and Internet to On, then Save & Run All.
-  After changing `so_arm_mjx/`, `visualise_mjx.py` or the scene XML, rebuild it with `python make_kaggle_mjx_notebook.py`.
-- **Local / other GPU machine:**
-  `pip install "jax[cuda12]==0.9.2" "brax==0.14.2" "flax==0.12.6" "mujoco==3.3.5" "mujoco-mjx==3.3.5"`
-  then `python -m so_arm_mjx.train --run-name PPO-carl-mjx-1`.
-  These versions are tested together. brax 0.14.2 doesn't work with jax >= 0.10.
-- **Watch a trained policy:** `python visualise_mjx.py mjx_out/models/<run>/final.pkl`
-  (on macOS use `mjpython`), or add `--video out.mp4` / `--headless --episodes 10`.
+The full comparison of everything we tested, including speeds, physics fidelity and what failed, is in
+[docs/TRAINING_OPTIONS.md](docs/TRAINING_OPTIONS.md).
 
+### GPU training with MuJoCo Warp (recommended)
 
-## GPU training with MuJoCo Warp (fastest option)
-
-`so_arm_warp/` runs the physics in MuJoCo Warp and PPO in PyTorch, all on an NVIDIA GPU. On a Kaggle T4,
-Warp's physics measured 36k env steps/s with the exact original model and ~96k with all original collision
-shapes plus a cheaper solver, against ~20k raw on an M3 with `SoFetchVecEnv`.
-
-- **Kaggle:** upload `kaggle_train_warp.ipynb`, set GPU T4 x2 and Internet On, then Save & Run All. It trains two
-  experiments at once, one per T4. Rebuild it with `python make_kaggle_warp_notebook.py --branch <your-branch>`.
-- **Any NVIDIA machine:** `pip install mujoco==4.0.1 mujoco-warp==4.0.1 torch`, then
+- **On Kaggle:** either click through [`kaggle_train_warp.ipynb`](kaggle_train_warp.ipynb) or send jobs with
+  `python tools/kaggle_job.py submit ...`. Both are step by step in [docs/KAGGLE.md](docs/KAGGLE.md).
+- **On any NVIDIA machine:** `pip install mujoco==4.0.1 mujoco-warp==4.0.1 torch`, then
   `python -m so_arm_warp.train --run-name me-1 --reward default --case full --hours 2`.
-- **Reward experiments:** add a class to `so_arm_warp/rewards.py` (see its docstring) and pass `--reward <name>`.
-  `pad_midpoint` fixes the default reward's grasp check, which the cube can't reach without penetrating the jaw.
-- **Physics choice (`--case`):** `full` (default), `original` (exact CPU-env physics, slower), `filtered`,
-  `simplified`. `python -m so_arm_warp.fidelity` compares them with the original, and `python -m so_arm_warp.bench`
-  measures speed.
-- **Watch a policy:** `python -m so_arm_warp.play warp_out/<run>/model_final.pt [--physics original]` (CPU only).
+- **Reward experiments:** add a class to [`so_arm_warp/rewards.py`](so_arm_warp/rewards.py) and pass `--reward <name>`.
+  `pad_midpoint` fixes the default reward's grasp check, which a real grip can't satisfy.
+- **Physics (`--case`):**
+  - `full` (default): all original collision shapes, cheaper solver.
+  - `original`: exactly the CPU env's physics, about 3× slower.
+  - `filtered` / `simplified`: fewer collision checks, fastest.
+
+  `python -m so_arm_warp.fidelity` compares them with the original physics, and `python -m so_arm_warp.bench` measures speed.
+- **Watch a policy (CPU, no GPU needed):** `python -m so_arm_warp.play <run>/model_final.pt [--physics original] [--video out.mp4]`.
+
+### CPU training with Stable-Baselines3 (fallback)
+
+- **Laptop:** `python train_parallel.py`. Set the run name at the top of the file. By default it runs 32 envs in one
+  process with `SoFetchVecEnv`, which uses MuJoCo's multithreaded rollout and gives the same observations and rewards
+  as the per-process setup. Set `vec_env_backend = "subproc"` for the old one-process-per-env setup.
+- **Kaggle CPU (no quota):** upload [`kaggle_train.ipynb`](kaggle_train.ipynb) through the website with
+  **Accelerator: None**. Rebuild it after changing the env with `python make_kaggle_notebook.py`.
+- **Watch a model:** `python visualise_model.py` (set `model_folder_zip` at the top).
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `so_arm_rl/` | The original CPU env (`SoFetchEnv`) and `SoFetchVecEnv`, which runs N copies in one process |
+| `so_arm_warp/` | GPU training: `scene.py` (scene and collision options), `physics.py` (Warp batches), `env.py`, `rewards.py`, `ppo.py`, `train.py`, `play.py`, plus `bench.py` / `fidelity*.py` |
+| `tools/kaggle_job.py` | Send, monitor and download Kaggle training jobs from the command line |
+| `kaggle_train_warp.ipynb` / `make_kaggle_warp_notebook.py` | Kaggle GPU notebook (clones the code from GitHub) and its generator |
+| `kaggle_train.ipynb` / `make_kaggle_notebook.py` | Kaggle CPU notebook (code embedded) and its generator |
+| `train_parallel.py` / `visualise_model.py` | SB3 training and viewing on CPU |
+| `docs/` | [Training options and measurements](docs/TRAINING_OPTIONS.md), [Kaggle guide](docs/KAGGLE.md) |

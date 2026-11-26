@@ -1,5 +1,5 @@
 """
-The fidelity tests from so_arm_mjx/fidelity_check.py, with physics stepped by MuJoCo Warp (float32, GPU),
+The fidelity tests from fidelity_check.py, with physics stepped by MuJoCo Warp (float32, GPU),
 compared against the exact original model on CPU MuJoCo:
 
     python -m so_arm_warp.fidelity --cases full original --seeds 20
@@ -9,7 +9,7 @@ import argparse
 import mujoco
 import numpy as np
 
-from so_arm_mjx.fidelity_check import _ORIG_CFG, Sim, run_all
+from .fidelity_check import _ORIG_CFG, Sim, run_all
 
 from .physics import CASES, PhysicsConfig, build
 
@@ -26,7 +26,7 @@ class WarpSim(Sim):
         self.cfg = cfg
         self.m = m
         self.d = mujoco.MjData(m)
-        from so_arm_mjx.model import settled_initial_state
+        from .scene import settled_initial_state
         self.q0, self.v0, self.c0 = settled_initial_state(m, cfg)
         self.qadr = np.array([m.joint(j).qposadr[0] for j in
                               ["robot_Rotation", "robot_Pitch", "robot_Elbow", "robot_Wrist_Pitch", "robot_Wrist_Roll", "robot_Jaw"]])

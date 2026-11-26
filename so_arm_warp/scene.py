@@ -1,7 +1,15 @@
 """
-SO-100 fetch scene for the GPU versions: config, collision models, settled start state and observation indices.
-Pure MuJoCo + numpy (no JAX), so it's shared by the MJX env (fetch_env.py), MuJoCo Warp, CPU playback
-(visualise_mjx.py) and fidelity_check.py. See fetch_env.py's docstring for what each option changes.
+The SO-100 fetch scene for GPU training: config, collision models, settled start state, observation indices.
+Pure MuJoCo + numpy. Builds from the same scene.xml as SoFetchEnv (so_arm_rl).
+
+Collision models (FetchConfig.collision_model). Dynamics (masses, inertias, joints, actuators) never change:
+  "full"        the original collision setup
+  "filtered"    original meshes, but no arm-vs-arm checks; big links only collide with the floor
+  "simplified"  task contacts unchanged (finger pads vs cube, cube vs floor); safety contacts use the original
+                collision meshes (hulls capped at max_hull_verts) vs the floor only, plus zero-mass capsules inside
+                the wrist/jaw meshes vs the cube, so nothing passes through the floor or the gripper
+fidelity_check.py compares these with the original physics (start pose, random motion, leaks, grasp, push).
+Solver: 10 iterations drops grasps on the stiff finger-pad contacts; 20 holds (the default).
 """
 import os
 from dataclasses import dataclass
@@ -126,7 +134,7 @@ def _simplified_model(max_hull_verts: Optional[int]) -> mujoco.MjModel:
 
 def build_mj_model(cfg: FetchConfig = FetchConfig()) -> mujoco.MjModel:
     """Loads the same scene.xml as the CPU env and applies the GPU-friendly settings.
-    Also used by visualise_mjx.py, so CPU playback has exactly the physics the policy trained on."""
+    Also used by play.py, so CPU playback has exactly the physics the policy trained on."""
     model_kind = cfg.collision_model if cfg.filter_collisions else "full"
     if model_kind not in ("full", "filtered", "simplified"):
         raise ValueError(f"unknown collision_model {model_kind!r}")

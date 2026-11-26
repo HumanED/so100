@@ -11,7 +11,7 @@ import mujoco
 import numpy as np
 import torch
 
-from so_arm_mjx.model import ObsIndices
+from .scene import ObsIndices
 
 from .physics import PhysicsConfig, WarpBatch
 from .rewards import REWARDS

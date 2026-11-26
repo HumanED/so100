@@ -15,7 +15,7 @@ import mujoco
 import numpy as np
 import torch
 
-from so_arm_mjx.model import ObsIndices
+from .scene import ObsIndices
 
 from .physics import PhysicsConfig, build
 from .ppo import ActorCritic, PPOConfig
@@ -42,7 +42,7 @@ def main():
     ac, cfg = load(a.checkpoint)
     case = a.physics or cfg["case"]
     m, fcfg = build(PhysicsConfig(**{**cfg["physics"], "case": case}))
-    from so_arm_mjx.model import settled_initial_state
+    from .scene import settled_initial_state
     q0, v0, c0 = settled_initial_state(m, fcfg)
     d = mujoco.MjData(m)
     idx = ObsIndices.from_model(m)

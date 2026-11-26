@@ -48,3 +48,6 @@ mjx_out/
 kaggle_out/
 kaggle_mjx_out/
 kaggle_src/
+warp_out/
+kaggle_results/
+.env
