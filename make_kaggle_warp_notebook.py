@@ -129,10 +129,12 @@ for ex in EXPERIMENTS:
     ck = os.path.join(OUT, "models", ex["run_name"], "final.zip")
     if not os.path.exists(ck):
         continue
+    print(ex["run_name"])
     for extra in (["--episodes", "20"], ["--episodes", "20", "--sampled"], ["--episodes", "1", "--video", os.path.join(OUT, f"{ex['run_name']}.mp4")]):
-        r = subprocess.run([sys.executable, "-m", "so_arm_warp.eval_sb3", ck] + extra, cwd=SRC, capture_output=True, text=True,
-                           env={**os.environ, "CUDA_VISIBLE_DEVICES": ""})
-        print(r.stdout[-1500:] or r.stderr[-800:])
+        # the GPU stays visible: EGL offscreen rendering (the video) runs on it
+        r = subprocess.run([sys.executable, "-m", "so_arm_warp.eval_sb3", ck] + extra, cwd=SRC, capture_output=True, text=True)
+        out = [l for l in r.stdout.splitlines() if "SoFetchEnv" in l or "Wrote" in l or "rendering" in l]
+        print("\n".join(out) if out else "", "" if r.returncode == 0 else f"(exit code {r.returncode})\n" + r.stderr[-1500:])
 """),
     md("## Package outputs"),
     code("""
