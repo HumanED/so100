@@ -47,7 +47,7 @@ about the reward rather than speed. Every measurement, including what failed (MJ
 
   `python -m so_arm_warp.sb3_bench` measures speed.
 - **Check a model in the real CPU env (no GPU needed):**
-  `python -m so_arm_warp.eval_sb3 warp_sb3_out/models/<run>/final.zip [--sampled] [--video out.mp4]`.
+  `python -m so_arm_warp.eval_sb3 warp_sb3_out/models/<run>/final.zip [--sampled] [--video out.mp4]` (video works on macOS, not on Kaggle).
   `visualise_model.py` and `evaluate_model.py` also work once the files are copied into `models/` and `vec_norm_stats/`.
 
 ### CPU training with Stable-Baselines3 (no GPU quota)

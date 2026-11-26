@@ -122,16 +122,14 @@ for ex in EXPERIMENTS:
 axes[0].legend()
 plt.tight_layout(); plt.savefig(os.path.join(OUT, "curves.png"), dpi=120); plt.show()
 """),
-    md("## Evaluate in the real CPU env (SoFetchEnv) + video"),
+    md("## Evaluate in the real CPU env (SoFetchEnv)\n\nVideos: run `python -m so_arm_warp.eval_sb3 <model>.zip --video out.mp4` on your laptop. MuJoCo's offscreen renderer segfaults on Kaggle (EGL and OSMesa both tried)."),
     code("""
-os.environ.setdefault("MUJOCO_GL", "egl")
 for ex in EXPERIMENTS:
     ck = os.path.join(OUT, "models", ex["run_name"], "final.zip")
     if not os.path.exists(ck):
         continue
     print(ex["run_name"])
-    for extra in (["--episodes", "20"], ["--episodes", "20", "--sampled"], ["--episodes", "1", "--video", os.path.join(OUT, f"{ex['run_name']}.mp4")]):
-        # the GPU stays visible: EGL offscreen rendering (the video) runs on it
+    for extra in (["--episodes", "20"], ["--episodes", "20", "--sampled"]):
         r = subprocess.run([sys.executable, "-m", "so_arm_warp.eval_sb3", ck] + extra, cwd=SRC, capture_output=True, text=True)
         out = [l for l in r.stdout.splitlines() if "SoFetchEnv" in l or "Wrote" in l or "rendering" in l]
         for line in out:

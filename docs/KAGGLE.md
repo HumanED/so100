@@ -53,7 +53,8 @@ function) has to be **pushed to a branch** first.
    - `models/<run>/<steps>.zip` checkpoints (every 25M steps) and `models/<run>/final.zip`
    - `vec_norm_stats/<run>/*.pkl`, the VecNormalize statistics each model needs
    - `logs/<run>/log.csv` metrics and tensorboard logs
-   - the CPU-env evaluation (20 episodes, deterministic and sampled actions) in the notebook's log, plus a video
+   - the CPU-env evaluation (20 episodes, deterministic and sampled actions) in the notebook's log. For a video, run
+     `python -m so_arm_warp.eval_sb3 <model>.zip --video out.mp4` on your laptop: MuJoCo's offscreen renderer crashes on Kaggle
    - `curves.png` comparing the runs
 
    Copy `models/<run>/` and `vec_norm_stats/<run>/` into the repo's `models/` and `vec_norm_stats/` folders to use
@@ -119,7 +120,7 @@ Some rules to know:
 pip install stable-baselines3==2.7.0 gymnasium==1.0.0      # plus the repo's usual mujoco; no GPU or Warp needed
 python -m so_arm_warp.eval_sb3 kaggle_results/<job>/results/models/<run>/final.zip              # grasp / success in SoFetchEnv
 python -m so_arm_warp.eval_sb3 <model>.zip --sampled --episodes 50
-python -m so_arm_warp.eval_sb3 <model>.zip --video out.mp4 --episodes 1                          # needs offscreen GL (Linux / Kaggle)
+python -m so_arm_warp.eval_sb3 <model>.zip --video out.mp4 --episodes 1                          # works on macOS; crashes on Kaggle
 # or copy models/<run>/ and vec_norm_stats/<run>/ into the repo and use visualise_model.py (viewer)
 ```
 
