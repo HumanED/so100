@@ -11,6 +11,8 @@ For running it, see [KAGGLE.md](KAGGLE.md).
 **Baseline ("1.0×"):** the original setup, `train_parallel.py` with SB3 PPO, 8 `SubprocVecEnv` workers and
 batch size 64 on the M3, at **2,400 training steps/s** (counting the PPO updates).
 
+![Training speed per experiment, relative to the original setup](training_speed.png)
+
 ## A. Training throughput
 
 This is the number that decides how long training takes.
