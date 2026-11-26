@@ -4,6 +4,7 @@ Speed (and a learning check) of Stable-Baselines3 PPO on MuJoCo Warp through SoF
     python -m so_arm_warp.sb3_bench --mode speed --json sb3_speed.json        # configs below, ~2 min each
     python -m so_arm_warp.sb3_bench --mode env                                 # adapter only, random actions
     python -m so_arm_warp.sb3_bench --mode learn --minutes 40 --csv learn.csv  # one longer run, grasp / success rate
+    python -m so_arm_warp.sb3_bench --mode eval --model learn_model.zip --physics original full   # play back a model
 
 Every run uses train_parallel.py's setup: VecMonitor + VecNormalize(norm_obs, norm_reward, clip_obs=10), MlpPolicy,
 SB3's default PPO hyperparameters except n_steps / batch_size / n_epochs, and train_parallel's TensorboardCallback.
@@ -120,9 +121,37 @@ def run_env(num_envs, physics, device, steps=200):
     return dict(config=f"adapter only ({physics})", num_envs=num_envs, steps_per_s=round(sps))
 
 
+def run_eval(model_path, vecnorm_path, physics, device, num_envs=1024):
+    """Plays a saved SB3 model for one episode in each of num_envs worlds; deterministic and sampled actions."""
+    model = PPO.load(model_path, device=device)
+    out = []
+    for det in (True, False):
+        venv = VecNormalize.load(vecnorm_path, SoFetchWarpVecEnv(num_envs, physics=physics, device=device))
+        venv.training, venv.norm_reward = False, False
+        obs = venv.reset()
+        grasp = np.zeros(num_envs, bool); succ = np.zeros(num_envs, bool); ret = np.zeros(num_envs)
+        for _ in range(MAX_EP):
+            a, _ = model.predict(obs, deterministic=det)
+            obs, _, dones, infos = venv.step(a)
+            ret += venv.get_original_reward()
+            for i in np.flatnonzero(dones):
+                grasp[i] |= bool(infos[i].get("grasped")); succ[i] |= bool(infos[i].get("is_success"))
+        r = dict(model=os.path.basename(model_path), physics=physics, deterministic=det, episodes=num_envs,
+                 grasp_rate=float(grasp.mean()), success_rate=float(succ.mean()), mean_return=float(ret.mean()))
+        print(f"eval {r['model']} on {physics:14s} {'deterministic' if det else 'sampled      '}: grasp {100 * r['grasp_rate']:5.1f}% "
+              f"success {100 * r['success_rate']:5.1f}% return {r['mean_return']:+.2f}", flush=True)
+        out.append(r)
+    return out
+
+
+MAX_EP = 100
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["speed", "env", "learn"], default="speed")
+    p.add_argument("--mode", choices=["speed", "env", "learn", "eval"], default="speed")
+    p.add_argument("--physics", nargs="+", default=["full"], help="learn: first entry; env / eval: each one")
+    p.add_argument("--model", default=None, help="eval: SB3 .zip (VecNormalize stats: <model minus _model>_vecnorm.pkl)")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--updates", type=int, default=4)
     p.add_argument("--max-s", type=float, default=150)
@@ -137,7 +166,7 @@ def main():
 
     results = []
     if a.mode == "env":
-        for physics in ("full", "original"):
+        for physics in a.physics:
             for n in (1024, 8192):
                 results.append(run_env(n, physics, a.device))
     elif a.mode == "speed":
@@ -149,8 +178,12 @@ def main():
                 results.append(dict(config=cfg[0], failed=f"{type(e).__name__}: {e}"))
             if a.json:
                 json.dump(results, open(a.json, "w"), indent=1)
+    elif a.mode == "eval":
+        vn = a.model.replace("_model.zip", "_vecnorm.pkl")
+        for physics in a.physics:
+            results += run_eval(a.model, vn, physics, a.device, num_envs=min(a.num_envs, 1024))
     else:
-        venv = make(a.num_envs, "full", a.device)
+        venv = make(a.num_envs, a.physics[0], a.device)
         model = PPO("MlpPolicy", venv, n_steps=16, batch_size=a.batch_size, n_epochs=10, device=a.device, verbose=0)
         tm = Timing(csv=a.csv)
         t = time.time()

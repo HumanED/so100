@@ -6,6 +6,9 @@ Cases (all build from scene.py, i.e. the same scene.xml SoFetchEnv loads):
   filtered     original collision meshes, no arm-vs-arm checks, GPU solver, 10 x 4 ms substeps
   full         ALL original collisions, GPU solver (pyramidal cone, `iterations`), 10 x 4 ms substeps
   original     the untouched scene.xml exactly as SoFetchEnv runs it (elliptic cone, 100 iterations), 20 x 2 ms
+  full_2ms     `full` (collisions + GPU solver) but original's 20 x 2 ms substeps: isolates the timestep
+  original_20it  `original` with 20 solver iterations instead of 100: isolates the iteration count
+  full_elliptic  `full` with original's elliptic friction cone (impratio 10 from the XML): isolates the cone
 """
 from dataclasses import dataclass, replace
 from typing import Optional
@@ -15,11 +18,11 @@ import numpy as np
 
 from .scene import SCENE_XML, FetchConfig, build_mj_model, settled_initial_state
 
-CASES = ("simplified", "filtered", "full", "original")
+CASES = ("simplified", "filtered", "full", "original", "full_2ms", "original_20it", "full_elliptic")
 
 # Contacts actually seen are ~4.5 per world (Kaggle T4 benchmark); these leave a wide margin without
 # reserving 20x too much memory (the cause of the out-of-memory failures at 32k worlds).
-CONTACTS_PER_WORLD = {"simplified": 16, "filtered": 24, "full": 24, "original": 24}
+CONTACTS_PER_WORLD = {"simplified": 16, "filtered": 24, "full": 24, "original": 24, "full_2ms": 24, "original_20it": 24, "full_elliptic": 24}
 NJMAX = 192  # constraint rows per world (contacts x up to 6 rows + joint limits + joint friction)
 
 
@@ -32,11 +35,19 @@ class PhysicsConfig:
     njmax: int = NJMAX
 
     def fetch_config(self) -> FetchConfig:
-        if self.case == "original":
-            return FetchConfig(collision_model="full", n_substeps=20, timestep=0.002,
-                               cone="elliptic", solver_iterations=100, ls_iterations=50)
+        if self.case in ("original", "original_20it"):
+            return FetchConfig(collision_model="full", n_substeps=20, timestep=0.002, cone="elliptic",
+                               solver_iterations=100 if self.case == "original" else 20, ls_iterations=50)
         if self.case not in CASES:
             raise ValueError(f"case must be one of {CASES}")
+        if self.case == "full_2ms":
+            return FetchConfig(collision_model="full", max_hull_verts=16, n_substeps=20, timestep=0.002,
+                               cone="pyramidal", solver_iterations=self.solver_iterations,
+                               ls_iterations=self.ls_iterations)
+        if self.case == "full_elliptic":
+            return FetchConfig(collision_model="full", max_hull_verts=16, n_substeps=10, timestep=0.004,
+                               cone="elliptic", solver_iterations=self.solver_iterations,
+                               ls_iterations=self.ls_iterations)
         return FetchConfig(collision_model=self.case, max_hull_verts=16, n_substeps=10, timestep=0.004,
                            cone="pyramidal", solver_iterations=self.solver_iterations,
                            ls_iterations=self.ls_iterations)
@@ -48,9 +59,11 @@ class PhysicsConfig:
 def build(pc: PhysicsConfig):
     """Returns (MjModel, FetchConfig). 'original' is the untouched XML (its own solver settings)."""
     cfg = pc.fetch_config()
-    if pc.case == "original":
+    if pc.case in ("original", "original_20it"):
         m = mujoco.MjModel.from_xml_path(SCENE_XML)
         m.opt.timestep = cfg.timestep
+        if pc.case == "original_20it":
+            m.opt.iterations = cfg.solver_iterations
     else:
         m = build_mj_model(cfg)
     return m, cfg
