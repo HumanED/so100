@@ -2,14 +2,14 @@
 Builds kaggle_train_warp.ipynb: Kaggle GPU notebook that trains SB3 PPO on MuJoCo Warp (so_arm_warp.train_sb3).
 It git-clones the code (so it stays under Kaggle's 1 MB API limit and always runs the pushed branch):
 
-    python make_kaggle_warp_notebook.py [--branch carlwarpsb3]
+    python make_kaggle_warp_notebook.py [--branch main]
 """
 import argparse
 import json
 import os
 
 p = argparse.ArgumentParser()
-p.add_argument("--branch", default="carlwarpsb3")
+p.add_argument("--branch", default="main")
 a = p.parse_args()
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "kaggle_train_warp.ipynb")

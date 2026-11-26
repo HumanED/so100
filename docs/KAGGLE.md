@@ -29,7 +29,7 @@ function) has to be **pushed to a branch** first.
    - **Internet: On**
 4. Edit the **settings cell** (the second cell):
    ```python
-   BRANCH = "carlwarpsb3"            # the GitHub branch to run (yours, if you changed the reward)
+   BRANCH = "main"                   # the GitHub branch to run (yours, if you changed the reward)
    HOURS = 11.0                      # each run stops after this long (sessions end at 12 h)
    NUM_ENVS = 8192                   # parallel envs per GPU
    EXPERIMENTS = [                   # one per GPU
@@ -107,7 +107,7 @@ Some rules to know:
 
 ## Trying your own reward function
 
-1. Make a branch: `git switch -c <you>-reward-x carlwarpsb3` (or `main` once this is merged).
+1. Make a branch: `git switch -c <you>-reward-x main`.
 2. Add a class to [`so_arm_warp/rewards.py`](../so_arm_warp/rewards.py) with `@register("your_name")`. The file's
    docstring lists everything a reward can use: cube, jaw, pad and goal positions, the observation, and the step count.
 3. Optionally check it runs on your laptop (CPU, slow but enough to catch errors):

@@ -146,7 +146,7 @@ def main():
     s.add_argument("--name", required=True, help="job (notebook) name; reusing a name adds a new version")
     s.add_argument("--exp", action="append", required=True, help="RUN_NAME:REWARD[:CASE], once or twice")
     s.add_argument("--case", default="original_20it", help="default physics case for --exp without one")
-    s.add_argument("--branch", default=current_branch() or "carlwarpsb3", help="GitHub branch to clone")
+    s.add_argument("--branch", default=current_branch() or "main", help="GitHub branch to clone")
     s.add_argument("--hours", type=float, default=11.0)
     s.add_argument("--num-envs", type=int, default=8192)
     s.add_argument("--resume-from", default=None, help="earlier job name whose results/models/<run>/final.zip to continue")
