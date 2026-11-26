@@ -119,13 +119,13 @@ class SoFetchEnv(gymnasium.Env, EzPickle):
             if not name.startswith("robot"):
                 continue
             jid = self._model_names.joint_name2id[name]
-            assert self.model.jnt_type[jid] in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE), name
+            assert int(self.model.jnt_type[jid]) in (int(mujoco.mjtJoint.mjJNT_HINGE), int(mujoco.mjtJoint.mjJNT_SLIDE)), name
             robot_joint_ids.append(jid)
         self._robot_qpos_idx = self.model.jnt_qposadr[robot_joint_ids].copy()
         self._robot_qvel_idx = self.model.jnt_dofadr[robot_joint_ids].copy()
 
         object_jid = self._model_names.joint_name2id["object:joint"]
-        assert self.model.jnt_type[object_jid] == mujoco.mjtJoint.mjJNT_FREE
+        assert int(self.model.jnt_type[object_jid]) == int(mujoco.mjtJoint.mjJNT_FREE)
         object_adr = self.model.jnt_qposadr[object_jid]
         self._object_qpos_slice = slice(object_adr, object_adr + 7)
         self._jaw_site_id = self._model_names.site_name2id["jaw_site"]

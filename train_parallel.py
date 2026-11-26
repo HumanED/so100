@@ -17,9 +17,17 @@ vectorized_env = True  # Set to True to use multiple environments
 # "single_process": SoFetchVecEnv, all envs in one process stepped by MuJoCo's multithreaded rollout (~1.7x faster
 #                   training on an M3; same observations/rewards/infos as SubprocVecEnv, see tests/test_vec_env.py)
 # "subproc":        one process per env (SubprocVecEnv), the previous setup
+# "warp":           SoFetchWarpVecEnv, thousands of envs on one CUDA GPU with MuJoCo Warp (needs `pip install
+#                   mujoco==4.0.1 mujoco-warp==4.0.1` and an NVIDIA GPU, e.g. Kaggle T4). Same observations, actions
+#                   and reward as SoFetchEnv; see so_arm_warp/sb3_vec_env.py and docs/TRAINING_OPTIONS.md
 vec_env_backend = "single_process"
 single_process_num_envs = 32
 rollout_size = 16384  # env steps per PPO update: PPO's default 2048 per env x 8 envs, as "subproc" on an 8-core machine
+# "warp" backend only: SB3's default batch_size of 64 would mean thousands of tiny gradient steps per update
+warp_num_envs = 8192
+warp_n_steps = 16           # rollout = warp_num_envs x warp_n_steps = 131,072 env steps per PPO update
+warp_batch_size = 8192
+warp_physics = "full"       # "full": all collision shapes, cheaper solver; "original": SoFetchEnv's exact solver (slower)
 start_from_existing = False
 old_model_file = "PPO-4-fetch-ethan/4750000"
 # When you want to train PPO-20-shadowgym-ethan more and create PPO-21-shadowgym-ethan
@@ -96,7 +104,13 @@ class TensorboardCallback(BaseCallback):
         for k in self.sub_rews_cumul.keys():
             self.sub_rews_cumul[k] = 0
 def main(models_dir, vec_stats_dir, logs_dir):
-    if vectorized_env and vec_env_backend == "single_process":
+    ppo_kwargs = {}
+    if vectorized_env and vec_env_backend == "warp":
+        from so_arm_warp.sb3_vec_env import SoFetchWarpVecEnv
+        vec_env = SoFetchWarpVecEnv(warp_num_envs, physics=warp_physics)
+        ppo_kwargs = {"batch_size": warp_batch_size, "device": str(vec_env.device)}
+        print(f"Running {warp_num_envs} envs on {vec_env.device} with MuJoCo Warp ({warp_physics} physics)")
+    elif vectorized_env and vec_env_backend == "single_process":
         vec_env = SoFetchVecEnv(single_process_num_envs)
         print(f"Running {single_process_num_envs} envs in one process on {vec_env.n_threads} threads")
     elif vectorized_env:
@@ -106,7 +120,12 @@ def main(models_dir, vec_stats_dir, logs_dir):
     else:
         vec_env = DummyVecEnv([make_env(0, seed)])
     # Keep env steps per PPO update the same however many envs run in parallel
-    n_steps = max(1, rollout_size // vec_env.num_envs) if vectorized_env and vec_env_backend == "single_process" else 2048
+    if vectorized_env and vec_env_backend == "warp":
+        n_steps = warp_n_steps
+    elif vectorized_env and vec_env_backend == "single_process":
+        n_steps = max(1, rollout_size // vec_env.num_envs)
+    else:
+        n_steps = 2048
 
     vec_env = VecMonitor(vec_env, filename=None)
 
@@ -116,8 +135,8 @@ def main(models_dir, vec_stats_dir, logs_dir):
         vec_env = VecNormalize.load(os.path.join(vec_stats_dir, old_model_file + ".pkl"), vec_env)
         vec_env.training = True
         vec_env.norm_reward = True
-        custom_objects = {"lr_schedule": 3e-4, "clip_range": 0.2, "n_steps": n_steps}
-        model = PPO.load(os.path.join(models_dir, old_model_file), vec_env, seed=seed, tensorboard_log=os.path.normpath(logs_dir), custom_objects=custom_objects)
+        custom_objects = {"lr_schedule": 3e-4, "clip_range": 0.2, "n_steps": n_steps, **{k: v for k, v in ppo_kwargs.items() if k != "device"}}
+        model = PPO.load(os.path.join(models_dir, old_model_file), vec_env, seed=seed, tensorboard_log=os.path.normpath(logs_dir), custom_objects=custom_objects, device=ppo_kwargs.get("device", "auto"))
     else:
         # Normalize observation and rewards.
         # VecNormalize computes a RunningMeanStd (mean, std number) for observations and a RunningMeanStd for rewards
@@ -127,7 +146,7 @@ def main(models_dir, vec_stats_dir, logs_dir):
                                norm_obs=True,
                                norm_reward=True,
                                clip_obs=10.0)
-        model = PPO(policy="MlpPolicy", env=vec_env, n_steps=n_steps, tensorboard_log=os.path.normpath(logs_dir), verbose=2)
+        model = PPO(policy="MlpPolicy", env=vec_env, n_steps=n_steps, tensorboard_log=os.path.normpath(logs_dir), verbose=2, **ppo_kwargs)
 
     # Training loop
     timesteps = 0
