@@ -27,7 +27,10 @@ rollout_size = 16384  # env steps per PPO update: PPO's default 2048 per env x 8
 warp_num_envs = 8192
 warp_n_steps = 16           # rollout = warp_num_envs x warp_n_steps = 131,072 env steps per PPO update
 warp_batch_size = 8192
-warp_physics = "full"       # "full": all collision shapes, cheaper solver; "original": SoFetchEnv's exact solver (slower)
+# "original_20it": SoFetchEnv's physics with 20 solver iterations instead of 100 (policies transfer to SoFetchEnv)
+# "full_elliptic": faster, also transfers; "full": fastest but policies DON'T transfer (pyramidal friction)
+# "original": exact. See docs/TRAINING_OPTIONS.md section D
+warp_physics = "original_20it"
 start_from_existing = False
 old_model_file = "PPO-4-fetch-ethan/4750000"
 # When you want to train PPO-20-shadowgym-ethan more and create PPO-21-shadowgym-ethan

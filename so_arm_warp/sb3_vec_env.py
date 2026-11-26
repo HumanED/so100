@@ -8,8 +8,9 @@ same reward ("default" in so_arm_warp/rewards.py, which tests/test_warp_reward.p
 VecNormalize exactly as before.
 
 Differences from SoFetchVecEnv, all for speed:
-- Physics is MuJoCo Warp (float32 on the GPU). physics="full" (default) keeps every collision shape with a cheaper
-  solver; physics="original" is SoFetchEnv's exact solver settings (about 3x slower).
+- Physics is MuJoCo Warp (float32 on the GPU). physics="original_20it" (default) is SoFetchEnv's model and solver
+  with 20 iterations instead of 100: policies trained on it work in SoFetchEnv. "full_elliptic" is ~1.4x faster and
+  also transfers. "full" is fastest but its pyramidal friction cone gives policies that fail in SoFetchEnv.
 - Per-env info dicts are empty except for envs whose episode just ended. The full SoFetchEnv info dict (the rew_*
   keys TensorboardCallback reads) is kept for env 0 only, which is all TensorboardCallback looks at.
 - Needs a CUDA GPU (Kaggle T4 is fine).
@@ -36,7 +37,7 @@ def _reset_info() -> dict:
 
 
 class SoFetchWarpVecEnv(VecEnv):
-    def __init__(self, num_envs: int = 4096, physics: str = "full", reward: str = "default",
+    def __init__(self, num_envs: int = 4096, physics: str = "original_20it", reward: str = "default",
                  device: Optional[str] = None, seed: int = 0):
         self.MAX_TIMESTEPS, self.N_DISCRETE, self.render_mode = MAX_TIMESTEPS, N_DISCRETE, None
         self.env = FetchWarpEnv(num_envs, PhysicsConfig(case=physics), reward=reward,

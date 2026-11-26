@@ -150,7 +150,7 @@ MAX_EP = 100
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["speed", "env", "learn", "eval"], default="speed")
-    p.add_argument("--physics", nargs="+", default=["full"], help="learn: first entry; env / eval: each one")
+    p.add_argument("--physics", nargs="+", default=["original_20it"], help="learn: first entry; env / eval: each one")
     p.add_argument("--model", default=None, help="eval: SB3 .zip (VecNormalize stats: <model minus _model>_vecnorm.pkl)")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--updates", type=int, default=4)

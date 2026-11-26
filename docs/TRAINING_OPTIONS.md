@@ -92,7 +92,23 @@ Each option is compared with the exact original physics on CPU MuJoCo (`python -
   | Warp `original` | 0/20 | 12/20 |
   | CPU `SoFetchEnv` | 0/20 | 6/20 |
 
-  The adapter is consistent: Warp `original` and the CPU env agree. The gap comes from `full`'s cheaper contact solver and larger timestep, and the policy relies on those. **Train on `original`, or at least check every model on it.**
+  The adapter is consistent: Warp `original` and the CPU env agree.
+
+**Finding the cause.** The `full`-trained model still grasps 100% on `full_2ms` (`full` with 2 ms timesteps), but drops to 0% deterministic on `full_elliptic` (`full` with `original`'s elliptic friction cone) and on `original_20it`. So the gap comes from `full`'s **pyramidal friction cone**, not the timestep or the collision hulls.
+
+**Hybrid physics, 50-minute SB3 run on each, one T4:**
+
+| Training physics | SB3 steps/s | Adapter only (8,192 envs) | Grasping by | Warp `original` (1,024 ep., det. / sampled) | CPU `SoFetchEnv` (20 ep., det. / sampled) |
+|---|---|---|---|---|---|
+| `full` | 39k | 96k | ~17 min | 0% / ~60% | 0/20 / 6/20 ❌ |
+| `full_elliptic` | 23k | 49k | ~19 min | 100% / 85% | 20/20 / 20/20 ✅ |
+| **`original_20it`** | **16.6k** | 24k | ~25 min | **100% / 99.7%** | **20/20 / 20/20** ✅ |
+| `original` | 9.1k | 10k | — | (exact) | — |
+
+- **`original_20it` is the default** for `vec_env_backend = "warp"`. It's `SoFetchEnv`'s exact model and solver, apart from 20 iterations instead of 100. That makes it 1.8× faster than `original` and about 2.3× SB3 + `SoFetchVecEnv`, and its policies transfer almost perfectly.
+- **`full_elliptic`** is 1.4× faster again and also transfers. Its sampled-action grasp rate on `original` is lower (85%), so check models on `original`.
+- **Don't train on `full`.** Our own PyTorch PPO (`so_arm_warp.train`) still defaults to `--case full`, so pass `--case full_elliptic` or `original_20it`.
+- In every run so far the cube never reached the goal (0% success). That's now a reward and task question, not a physics one.
 
 ## Caveats
 
