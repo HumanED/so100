@@ -3,7 +3,7 @@ How close are the GPU collision models to the original SO-100 physics? Runs on C
 
     python -m so_arm_mjx.fidelity_check
 
-Every model is compared with the ORIGINAL scene (the physics SoFetchEnv uses: full collision meshes, elliptic
+No JAX needed. Every model is compared with the ORIGINAL scene (the physics SoFetchEnv uses: full collision meshes, elliptic
 cone, 100 solver iterations):
 
 1. start pose      settled reset state vs the original
@@ -19,7 +19,7 @@ import argparse
 import mujoco
 import numpy as np
 
-from .fetch_env import SCENE_XML, FetchConfig, build_mj_model, settled_initial_state
+from .model import SCENE_XML, FetchConfig, build_mj_model, settled_initial_state
 
 ARM = ["robot_Rotation", "robot_Pitch", "robot_Elbow", "robot_Wrist_Pitch", "robot_Wrist_Roll", "robot_Jaw"]
 _ORIG_CFG = FetchConfig(cone="elliptic", solver_iterations=100, ls_iterations=50, collision_model="full")
