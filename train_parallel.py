@@ -6,6 +6,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize, DummyVecEnv, VecMonitor
 
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
+from so_arm_rl.envs.fetch.so_arm_fetch_vec_env import SoFetchVecEnv
 
 """
 Created by Ethan Cheam
@@ -13,6 +14,12 @@ Created by Ethan Cheam
 
 # SETTINGS
 vectorized_env = True  # Set to True to use multiple environments
+# "single_process": SoFetchVecEnv, all envs in one process stepped by MuJoCo's multithreaded rollout (~1.7x faster
+#                   training on an M3; same observations/rewards/infos as SubprocVecEnv, see tests/test_vec_env.py)
+# "subproc":        one process per env (SubprocVecEnv), the previous setup
+vec_env_backend = "single_process"
+single_process_num_envs = 32
+rollout_size = 16384  # env steps per PPO update: PPO's default 2048 per env x 8 envs, as "subproc" on an 8-core machine
 start_from_existing = False
 old_model_file = "PPO-4-fetch-ethan/4750000"
 # When you want to train PPO-20-shadowgym-ethan more and create PPO-21-shadowgym-ethan
@@ -89,12 +96,17 @@ class TensorboardCallback(BaseCallback):
         for k in self.sub_rews_cumul.keys():
             self.sub_rews_cumul[k] = 0
 def main(models_dir, vec_stats_dir, logs_dir):
-    if vectorized_env:
+    if vectorized_env and vec_env_backend == "single_process":
+        vec_env = SoFetchVecEnv(single_process_num_envs)
+        print(f"Running {single_process_num_envs} envs in one process on {vec_env.n_threads} threads")
+    elif vectorized_env:
         num_envs = os.cpu_count() # Number of parallel environments. Equal to number of CPU cores
         print(f"Running on {num_envs} cores")
         vec_env = SubprocVecEnv([make_env(i, seed) for i in range(num_envs)])
     else:
         vec_env = DummyVecEnv([make_env(0, seed)])
+    # Keep env steps per PPO update the same however many envs run in parallel
+    n_steps = max(1, rollout_size // vec_env.num_envs) if vectorized_env and vec_env_backend == "single_process" else 2048
 
     vec_env = VecMonitor(vec_env, filename=None)
 
@@ -104,7 +116,7 @@ def main(models_dir, vec_stats_dir, logs_dir):
         vec_env = VecNormalize.load(os.path.join(vec_stats_dir, old_model_file + ".pkl"), vec_env)
         vec_env.training = True
         vec_env.norm_reward = True
-        custom_objects = {"lr_schedule": 3e-4, "clip_range": 0.2}
+        custom_objects = {"lr_schedule": 3e-4, "clip_range": 0.2, "n_steps": n_steps}
         model = PPO.load(os.path.join(models_dir, old_model_file), vec_env, seed=seed, tensorboard_log=os.path.normpath(logs_dir), custom_objects=custom_objects)
     else:
         # Normalize observation and rewards.
@@ -115,7 +127,7 @@ def main(models_dir, vec_stats_dir, logs_dir):
                                norm_obs=True,
                                norm_reward=True,
                                clip_obs=10.0)
-        model = PPO(policy="MlpPolicy", env=vec_env, tensorboard_log=os.path.normpath(logs_dir), verbose=2)
+        model = PPO(policy="MlpPolicy", env=vec_env, n_steps=n_steps, tensorboard_log=os.path.normpath(logs_dir), verbose=2)
 
     # Training loop
     timesteps = 0

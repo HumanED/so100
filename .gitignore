@@ -43,3 +43,12 @@ vizdoom.ini
 docs/envs/**/*.*
 !docs/envs/**/index.md
 _build/
+
+# Training outputs
+mjx_out/
+kaggle_out/
+kaggle_mjx_out/
+kaggle_src/
+warp_out/
+kaggle_results/
+.env
