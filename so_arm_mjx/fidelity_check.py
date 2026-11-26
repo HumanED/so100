@@ -37,9 +37,10 @@ MODELS = {
 
 
 class Sim:
-    def __init__(self, cfg: FetchConfig):
+    def __init__(self, cfg: FetchConfig, exact: bool = False):
+        """exact=True: the untouched scene.xml (SoFetchEnv's physics); otherwise build_mj_model(cfg)."""
         self.cfg = cfg
-        self.m = build_mj_model(cfg) if cfg.collision_model != "full" else self._original(cfg)
+        self.m = self._original(cfg) if exact else build_mj_model(cfg)
         self.d = mujoco.MjData(self.m)
         self.q0, self.v0, self.c0 = settled_initial_state(self.m, cfg)
         self.qadr = np.array([self.m.joint(j).qposadr[0] for j in ARM])
@@ -123,7 +124,12 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--seeds", type=int, default=30)
     a = p.parse_args()
-    sims = {k: Sim(c) for k, c in MODELS.items()}
+    sims = {k: Sim(c, exact=(k == "original")) for k, c in MODELS.items()}
+    run_all(sims, a.seeds)
+
+
+def run_all(sims: dict, seeds: int = 30):
+    """Runs all four tests. sims["original"] must be the exact original model (the reference)."""
     ref = sims["original"]
     leak = LeakChecker()
 
@@ -132,12 +138,12 @@ def main():
         print(f"   {k:32s} arm joints {np.abs(s.q0[s.qadr] - ref.q0[ref.qadr]).max():.2e} rad | "
               f"cube {np.abs(s.q0[s.obj:s.obj + 3] - ref.q0[ref.obj:ref.obj + 3]).max():.2e} m")
 
-    print(f"\n2) RANDOM MOTIONS ({a.seeds} sequences x 4 s): drift from original, and leaks through the ORIGINAL meshes")
+    print(f"\n2) RANDOM MOTIONS ({seeds} sequences x 4 s): drift from original, and leaks through the ORIGINAL meshes")
     print(f"   {'model':32s} {'jaw drift median/max':>22s} {'cube moved (mean)':>18s} {'cube drift max':>15s} {'arm->floor leaks':>17s} {'cube->gripper leaks':>20s}")
     ref_traj = {}
     for k, s in sims.items():
         jaw_d, cube_d, cube_moved, fl, cl, n = [], [], [], 0, 0, 0
-        for seed in range(a.seeds):
+        for seed in range(seeds):
             s.reset()
             traj = np.concatenate([s.run(c, 0.4) for c in random_ctrls(seed, s.m)])
             if k == "original":
