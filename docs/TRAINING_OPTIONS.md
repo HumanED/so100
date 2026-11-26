@@ -3,122 +3,140 @@
 How fast can we train the SO-100 fetch task, and where? Everything below was measured in November 2026,
 on an Apple M3 laptop (8 cores) and on free Kaggle notebooks (2× NVIDIA T4 GPUs, or a 4-core CPU).
 
-**Bottom line:** train with **MuJoCo Warp on Kaggle's free T4 GPUs** (`so_arm_warp/`). It runs about
-**27× faster per experiment** than our original laptop setup, and each Kaggle notebook trains two experiments at
-once, one per GPU. It can use all of the original collision shapes, and every physics option passed the grasp test.
-For running it, see [KAGGLE.md](KAGGLE.md).
-
-**Measured before the PPO7/PPO8 changes on `main`:** 11 action bins, the older reward, and the scene without the
-two jaw sites. The physics (masses, joints, collision shapes, solver) is unchanged, so all speeds and fidelity results
-still apply. Everything on `warp-training` now trains `main`'s current task. `SoFetchVecEnv` and the Warp
-`default` reward are checked against `SoFetchEnv` by the tests in `tests/`.
+**Bottom line:** train with **Stable-Baselines3 PPO on MuJoCo Warp, `original_20it` physics, on Kaggle's free T4
+GPUs** (`python -m so_arm_warp.train_sb3`, or the Kaggle notebook / job tool in [KAGGLE.md](KAGGLE.md)). It trains at
+**16,600 steps/s per T4, about 7× our original laptop setup**, two experiments per notebook. It learned the grasp in
+~25 minutes, and the model grasps in **20/20 episodes in the real CPU `SoFetchEnv`**. The faster Warp options
+(`full` physics, our own PyTorch PPO) produced policies that don't work in the real env, so speed alone is not the
+measure.
 
 **Baseline ("1.0×"):** the original setup, `train_parallel.py` with SB3 PPO, 8 `SubprocVecEnv` workers and
 batch size 64 on the M3, at **2,400 training steps/s** (counting the PPO updates).
 
-![Training speed per experiment, relative to the original setup](training_speed.png)
+![Training speed of every option, coloured by whether its policies work in the real env](training_speed.png)
 
-## A. Training throughput
+## Everything ranked
 
-This is the number that decides how long training takes.
+Training steps/s include the PPO updates. "Real env" means playing the trained model back in the CPU `SoFetchEnv`,
+deterministic / sampled actions, 20 episodes. "Grasp" is the PPO8 +20 bonus: the jaw centre within 3 cm of the cube
+with the jaws at least 4 cm open.
 
-| # | Approach | Hardware | Physics | Training steps/s | vs baseline | Status |
-|---|---|---|---|---|---|---|
-| 1 | **MuJoCo Warp + PyTorch PPO** (`so_arm_warp`) | Kaggle T4 ×2 (free, ~30 GPU-hours/week each) | All original collision shapes, cheaper solver (`--case full`) | **65,000 per T4 = 130,000 per notebook** (2 experiments) | **27× per experiment** | ✅ Recommended. Learned to reach the cube in 15 min |
-| 2 | MuJoCo Warp + PyTorch PPO, exact physics | Kaggle T4 ×2 | Exactly the CPU env's physics (`--case original`) | ~25–35k per T4 (estimated from 43k physics-only) | ~10–15× | ✅ Physics verified; training speed not yet measured |
-| 3 | SB3 + `SoFetchVecEnv`, batch 512 | Any laptop | Exact original | 7,100 | 3.0× | ✅ Free fallback, no quota |
-| 4 | SB3 + `SoFetchVecEnv`, batch 64 | Any laptop | Exact original | 3,300 | 1.4× | ✅ |
-| 5 | SB3 + `SubprocVecEnv`, batch 512 | Any laptop | Exact original | 4,100 | 1.7× | ✅ Batch-size change only |
-| – | **Baseline:** SB3 + `SubprocVecEnv`, batch 64 | M3 laptop | Exact original | **2,400** | 1.0× | Original setup |
-| 6 | Kaggle CPU notebook (`kaggle_train.ipynb`) | Kaggle CPU, 4 cores (free, no quota) | Exact original | Not measured; likely about half a laptop | ~1–1.5× (est.) | ⚠️ Tested locally, not yet on Kaggle |
-| 7 | MuJoCo MJX + Brax, simplified collisions | Kaggle T4 ×2 | Simplified, 20 solver iterations | 3,050 | 1.3× | ⚠️ Works but slower than a laptop. Dropped (on branch `carlgpu`) |
-| 8 | MuJoCo MJX + Brax, original collision layout | Kaggle T4 ×2 | 10 solver iterations | ~1,000 | 0.4× | ❌ Too slow, and 10 iterations dropped grasped cubes |
-| 9 | SB3 with PyTorch on Apple Metal (MPS) | M3 GPU | Exact original | 217–448 | 0.1–0.2× | ❌ Each step's round trip to the GPU costs more than the small network saves |
+| # | Setup | Hardware | Training steps/s | vs baseline | Hours per 100M steps | Physics | Grasp in the real env | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| 1 | SB3 + Warp `full`, batch 16k, 5 epochs | T4 | 60,500 | 25× | 0.46 | Pyramidal friction, 4 ms steps | ❌ (same physics as #3) | Fast but its policies don't transfer |
+| 2 | Our PyTorch PPO + Warp `full` | T4 | ~60,000 | 25× | 0.46 | Pyramidal friction, 4 ms steps | ❌ never learned (0.02% on Warp) | Dropped |
+| 3 | SB3 + Warp `full`, batch 8k | T4 | 39,000 | 16× | 0.71 | Pyramidal friction, 4 ms steps | ❌ 0/20 / 6/20 | Dropped |
+| 4 | SB3 + Warp `full_elliptic` | T4 | 23,000 | 9.6× | 1.2 | Real friction model, 4 ms steps | ✅ 20/20 / 20/20 | For quick reward sweeps |
+| 5 | **SB3 + Warp `original_20it`** | **T4** | **16,600** | **6.9×** | **1.7** | **Exact model and solver, 20 iterations instead of 100** | ✅ **20/20 / 20/20** | **Recommended default** |
+| 6 | SB3 + Warp `original` | T4 | 9,100 | 3.8× | 3.1 | Exact (float32 on GPU) | Not trained (should transfer) | Too slow for what it adds |
+| 7 | SB3 + `SoFetchVecEnv`, batch 512 | M3 CPU | 7,100 | 3.0× | 3.9 | Exact (within ~1e-8) | ✅ (it is the real env) | Fallback when out of GPU quota |
+| 8 | SB3 + `SubprocVecEnv`, batch 512 | M3 CPU | 4,100 | 1.7× | 6.8 | Exact | ✅ | Batch-size change only |
+| 9 | SB3 + `SoFetchVecEnv`, batch 64 | M3 CPU | 3,300 | 1.4× | 8.4 | Exact | ✅ | |
+| 10 | MJX / Brax, simplified collisions | T4 | 3,050 | 1.3× | 9.1 | Simplified, 20 iterations | — | ❌ Slower than a laptop (branch `carlgpu`) |
+| – | **Baseline:** SB3 + `SubprocVecEnv`, batch 64 | M3 CPU | **2,400** | 1.0× | 11.6 | Exact | ✅ | The original setup |
+| 11 | MJX / Brax, original collision layout | T4 | ~1,000 | 0.4× | 28 | 10 iterations | — | ❌ Too slow; 10 iterations dropped grasped cubes |
+| 12 | SB3 + Warp with main's batch size of 64 | T4 | 733 | 0.3× | 38 | — | — | ❌ 97% of the time goes to tiny gradient steps |
+| 13 | SB3 with PyTorch on Apple Metal (MPS) | M3 GPU | 217–448 | 0.1–0.2× | 62+ | Exact | — | ❌ GPU round trips cost more than they save |
+| – | Kaggle CPU notebook (`kaggle_train.ipynb`) | Kaggle CPU, 4 cores | Not measured | ~1–1.5× (est.) | — | Exact | ✅ | ⚠️ Tested locally only |
+| – | Kaggle TPU v5e-8 | Kaggle TPU | — | — | — | — | — | ❌ Never ran (one TPU session per account) |
 
-## B. Physics/env speed only, including dead ends
+## How quickly each one learns (`default` reward, one T4)
 
-| Approach | Env steps/s | Status |
-|---|---|---|
-| **Warp, one T4:** simplified / filtered / full / exact original | **170k / 156k / 127k / 43k** | ✅ |
-| **Warp, both T4s:** full / exact original | **273k / 95k** | ✅ Scales about 2.15× |
-| `SoFetchVecEnv` (all envs in one process, MuJoCo's threaded `rollout`), M3 | 20,500 | ✅ |
-| `SubprocVecEnv`, 8 processes, M3 | 8,900–16,300 | Baseline |
-| Thread-pool vec env (a Python thread per env) | 7,100–8,300 | ❌ No faster than processes (Python's lock, waiting on the slowest env) |
-| MJX on one T4: original layout / simplified collisions | 553 / 2,100 | ❌ / ⚠️ Collision detection was ~95% of the cost |
-| MJX on the M3 CPU (JAX) | 26–36 | ❌ 100× slower than plain MuJoCo |
-| MJX on Apple Metal (`jax-metal`) | – | ❌ Missing operations, then a compiler crash; the plugin is unmaintained |
-| Kaggle TPU v5e-8 | – | ⏳ Never got through the queue. Moot now: Warp is NVIDIA-only and already wins |
-
-## C. Physics options for Warp (`--case`)
-
-Each option is compared with the exact original physics on CPU MuJoCo (`python -m so_arm_warp.fidelity`).
-
-| `--case` | Speed (1 T4, physics) | Jaw drift in random motion (median) | Grasp & hold | Gripper pushes cube (original: 4.1 cm) | Arm-into-floor / cube-into-gripper leaks (original: 1.3% / 0.3%) |
+| Setup | First reliable grasp | Steps by then | Grasp rate at the end of the run | Success (cube at goal) | Return at the end |
 |---|---|---|---|---|---|
-| `original` (exact) | 43k | **0.85 cm** | ✅ Held | 4.0 cm | 1.2% / 0.3% |
-| `full` (default) | 127k | 4.2 cm | ✅ Held | 5.8 cm | 1.2% / 0.0% |
-| `filtered` | 156k | 6.2 cm | ✅ Held | 5.8 cm | 1.2% / 0.0% |
-| `simplified` | 170k | 6.5 cm | ✅ Held | 5.6 cm | 1.6% / 0.0% |
+| SB3 + Warp `full` | ~17 min | ~29M | 99.8% (40 min) | 0% | +1.8 |
+| SB3 + Warp `full_elliptic` | ~19 min | ~27M | 100% (50 min) | 0% | +0.7 to +1.0 |
+| **SB3 + Warp `original_20it`** | **~25 min** | **~25M** | **100% (50 min)** | 0% | +1.0 to +1.6 |
+| Our PyTorch PPO + Warp `full` | Never, in 40 min | 147M seen | 0.02% | 0% | −20.7 |
+| SB3 + `SoFetchVecEnv` (M3) | ~1 h *(estimate)* | ~25M | Not run | — | — |
+| SB3 + `SubprocVecEnv` (M3) | ~3 h *(estimate)* | ~25M | Not run | — | — |
 
-- **`full` keeps every original collision shape** and only uses a cheaper contact solver: a pyramidal friction cone and 20 iterations instead of 100. `filtered` and `simplified` also drop collision checks that don't matter for the task. Masses, joints and motors are identical in every case.
-- **The drift column measures sensitivity, not error.** Contact-heavy random motion is chaotic, so tiny differences grow. The tests that represent the task (grasp, push, leaks) all pass.
+The CPU rows assume the same ~25M steps to learn, at their own speed; they weren't measured.
+**No run has carried the cube to the goal yet.** That's now a reward and task question, not a speed or physics one.
 
-## D. SB3 PPO on Warp (`vec_env_backend = "warp"`)
+## Do policies transfer to the exact physics?
 
-`SoFetchWarpVecEnv` (`so_arm_warp/sb3_vec_env.py`) puts the Warp env behind SB3's VecEnv API. It uses the same 64-step actions, observation and reward as `SoFetchEnv`, and works inside `VecMonitor` and `VecNormalize`. Measured on one Kaggle T4 (`python -m so_arm_warp.sb3_bench`):
+| Trained on | On its own physics (det. / sampled) | Warp `original`, 1,024 episodes | CPU `SoFetchEnv`, 20 episodes |
+|---|---|---|---|
+| `full` | 100% / 100% | 0% / ~60% | 0/20 / 6/20 ❌ |
+| `full_elliptic` | 100% / 84% | 100% / 85% | 20/20 / 20/20 ✅ |
+| **`original_20it`** | 100% / 99.4% | **100% / 99.7%** | **20/20 / 20/20** ✅ |
 
-| SB3 setup | Training steps/s | Notes |
+**Finding the cause.** The `full`-trained model still grasps 100% on `full_2ms` (`full` with 2 ms timesteps), but
+drops to 0% deterministic on `full_elliptic` (`full` with `original`'s elliptic friction cone) and on `original_20it`.
+So the gap comes from `full`'s **pyramidal friction cone**, not the timestep or the collision hulls. The policy
+learned to rely on how the pyramidal cone grips the cube. The SB3 adapter itself is consistent: Warp `original` and
+the CPU env agree.
+
+## Physics speed only (no learning)
+
+| Physics | Through the SB3 adapter, 8,192 envs, 1 T4 | Raw physics, 1 T4 | Raw physics, 2 T4s | Jaw drift vs exact (median) | Grasp & hold |
+|---|---|---|---|---|---|
+| `simplified` | — | 170k | — | 6.5 cm | ✅ |
+| `filtered` | — | 156k | — | 6.2 cm | ✅ |
+| `full` | 96k | 127k | 273k | 4.2 cm | ✅ (but policies don't transfer) |
+| `full_2ms` | 51k | — | — | — | — |
+| `full_elliptic` | 49k | — | — | — | — |
+| `original_20it` | 24k | — | — | — | — |
+| `original` | 10k | 43k | 95k | 0.85 cm (float32 only) | ✅ |
+| `SoFetchVecEnv` (one process, MuJoCo's threaded `rollout`), M3 | — | 20,500 | — | 0 | ✅ |
+| `SubprocVecEnv`, 8 processes, M3 | — | 8,900–16,300 | — | 0 | ✅ |
+| CPU `SoFetchEnv`, one env (with cached observation lookups) | — | 3,500 (was 2,100) | — | 0 | ✅ |
+| Thread-pool vec env (a Python thread per env) | — | 7,100–8,300 | — | 0 | ❌ No faster than processes |
+| MJX on one T4: original layout / simplified collisions | — | 553 / 2,100 | — | — | ❌ / ⚠️ |
+| MJX on the M3 CPU (JAX) / on Apple Metal (`jax-metal`) | — | 26–36 / – | — | — | ❌ |
+
+The adapter column is lower than raw physics because it includes resets, the reward and observation, the copy back
+to the CPU for SB3, and realistic contact states. It's the one that matters for training. Drift measures
+sensitivity, not error: contact-heavy random motion is chaotic, so tiny differences grow
+(`python -m so_arm_warp.fidelity`).
+
+### Physics options (`--physics` / `--case`)
+
+| Option | What it is |
+|---|---|
+| `original` | The untouched `scene.xml` exactly as `SoFetchEnv` runs it: elliptic friction cone, 100 solver iterations, 20 × 2 ms per step |
+| **`original_20it`** | `original` with 20 solver iterations. **Default** |
+| `full_elliptic` | Original collision shapes (hulls capped at 16 vertices), elliptic cone, 20 iterations, 10 × 4 ms |
+| `full_2ms` | `full` with 20 × 2 ms steps (used to find the cause above) |
+| `full` | Pyramidal cone, 20 iterations, 10 × 4 ms. Fast, but don't train on it |
+| `filtered` / `simplified` | `full` with fewer collision checks |
+
+Masses, joints, motors and the reward are identical in every option.
+
+## SB3-on-Warp settings
+
+| SB3 setup (1 T4, `full` physics) | Training steps/s | Notes |
 |---|---|---|
-| 1,024 envs, main's PPO settings (batch 64) | 733 | ❌ 97% of the time goes to ~2,500 tiny gradient steps per update |
+| 1,024 envs, main's PPO settings (batch 64) | 733 | ❌ ~2,500 tiny gradient steps per update |
 | 4,096 envs, batch 4,096, 10 epochs | 26k | |
-| **8,192 envs, batch 8,192, 10 epochs** | **39k** | `train_parallel.py` default for `"warp"` |
-| 8,192 envs, batch 16,384, 5 epochs | 61k | Same speed as our PyTorch PPO |
-| 8,192 envs, batch 8,192, `original` physics | 9.1k | Exact physics: ~1.3× SB3 + `SoFetchVecEnv` |
-| Adapter only, random actions (`full` / `original`) | 96k / 10k | |
+| **8,192 envs, batch 8,192, 10 epochs** | **39k** | The default (`train_sb3.py`, `train_parallel.py`'s `"warp"` backend) |
+| 8,192 envs, batch 16,384, 5 epochs | 61k | Untested for learning |
 
-**40-minute learning run, same T4, `full` physics, `default` reward:**
+## What a Kaggle session gets you (12 h, 2 × T4)
 
-| Trainer | Steps in 40 min | Grasp rate at the end | Success rate | Episode return |
-|---|---|---|---|---|
-| SB3 PPO on Warp (8,192 envs, batch 8,192) | 75M | **99.8%** (from ~17 min) | 0% | +1.8 |
-| Our PyTorch PPO on Warp (8,192 envs) | 147M | 0.02% | 0% | −20.7 |
-
-- **SB3 learned the grasp bonus and our PPO didn't,** despite our PPO taking twice as many steps. The likely reasons are SB3's discrete actions and reward normalisation. "Grasp" here means the PPO8 bonus: the jaw centre within 3 cm of the cube with the jaws at least 4 cm open. Neither run moved the cube to the goal.
-- **⚠️ Policies trained on `full` physics don't transfer to exact physics.** The same SB3 model, played back for 20 episodes:
-
-  | Played on | Grasp (deterministic) | Grasp (sampled) |
-  |---|---|---|
-  | Warp `full` | 20/20 | 20/20 |
-  | Warp `original` | 0/20 | 12/20 |
-  | CPU `SoFetchEnv` | 0/20 | 6/20 |
-
-  The adapter is consistent: Warp `original` and the CPU env agree.
-
-**Finding the cause.** The `full`-trained model still grasps 100% on `full_2ms` (`full` with 2 ms timesteps), but drops to 0% deterministic on `full_elliptic` (`full` with `original`'s elliptic friction cone) and on `original_20it`. So the gap comes from `full`'s **pyramidal friction cone**, not the timestep or the collision hulls.
-
-**Hybrid physics, 50-minute SB3 run on each, one T4:**
-
-| Training physics | SB3 steps/s | Adapter only (8,192 envs) | Grasping by | Warp `original` (1,024 ep., det. / sampled) | CPU `SoFetchEnv` (20 ep., det. / sampled) |
-|---|---|---|---|---|---|
-| `full` | 39k | 96k | ~17 min | 0% / ~60% | 0/20 / 6/20 ❌ |
-| `full_elliptic` | 23k | 49k | ~19 min | 100% / 85% | 20/20 / 20/20 ✅ |
-| **`original_20it`** | **16.6k** | 24k | ~25 min | **100% / 99.7%** | **20/20 / 20/20** ✅ |
-| `original` | 9.1k | 10k | — | (exact) | — |
-
-- **`original_20it` is the default** for `vec_env_backend = "warp"`. It's `SoFetchEnv`'s exact model and solver, apart from 20 iterations instead of 100. That makes it 1.8× faster than `original` and about 2.3× SB3 + `SoFetchVecEnv`, and its policies transfer almost perfectly.
-- **`full_elliptic`** is 1.4× faster again and also transfers. Its sampled-action grasp rate on `original` is lower (85%), so check models on `original`.
-- **Don't train on `full`.** Our own PyTorch PPO (`so_arm_warp.train`) still defaults to `--case full`, so pass `--case full_elliptic` or `original_20it`.
-- In every run so far the cube never reached the goal (0% success). That's now a reward and task question, not a physics one.
+| Setup | Steps per GPU per session | Experiments per session |
+|---|---|---|
+| `original_20it` | ~720M | 2 |
+| `full_elliptic` | ~1.0B | 2 |
+| CPU `SoFetchVecEnv` on a laptop, 12 h overnight | ~300M | 1 |
 
 ## Caveats
 
-- **Only speed is compared.** Warp uses continuous actions and our own PyTorch PPO, while SB3 uses 64 discrete action steps per motor. We haven't yet compared how many steps each needs to actually solve the task.
-- **PPO settings are untuned,** and the longest Warp training run so far is 15 minutes.
-- **Two reward problems from the old env are fixed on `main` (PPO7/PPO8).** The +20 grasp bonus used to be unreachable: it needed the cube centre within 4 mm of `jaw_site`, which sits 1.4 cm from the fixed jaw's pads. Bonuses were also paid only once per worker lifetime. The current reward uses a 3 cm, jaws-open grasp check and re-arms the bonuses every episode. Warp's `default` reward is that same reward, and `legacy` keeps the old one for comparison.
+- **One run each,** seed 0 / 1. Expect some variation between runs.
+- **PPO settings are SB3's defaults** apart from the batch size. Nothing is tuned.
+- **Hardware differs:** the CPU rows were measured on an M3, the Warp rows on one Kaggle T4.
+- **Two reward problems from the old env are fixed on `main` (PPO7/PPO8).** The +20 grasp bonus used to be
+  unreachable (cube centre within 4 mm of `jaw_site`, 1.4 cm from the fixed jaw's pads), and bonuses were paid only
+  once per worker lifetime. Warp's `default` reward is `main`'s current reward (`tests/test_warp_reward.py`), and
+  `legacy` keeps the old one.
 
 ## Recommendation
 
-1. **Main workflow: Warp on Kaggle T4 ×2 with `--case full`.** Each person runs two reward experiments per notebook, using their own free weekly GPU hours.
-2. **Confirm the best policies on the exact physics:** train or evaluate with `--case original`, or play them back with `python -m so_arm_warp.play <checkpoint> --physics original`.
-3. **Free fallback:** `SoFetchVecEnv` (`train_parallel.py`) on a laptop or Kaggle CPU. That's 3× the baseline, exact physics and no quota.
-4. **Dropped:** MJX/Brax (kept on branch `carlgpu`), TPU, Apple Metal, and the thread-pool env.
+1. **Main workflow: SB3 + Warp `original_20it` on Kaggle T4 ×2.** Each person runs two reward experiments per
+   notebook on their own free weekly GPU hours ([KAGGLE.md](KAGGLE.md)).
+2. **Quick reward sweeps:** `full_elliptic` (1.4× faster). Check the winners with
+   `python -m so_arm_warp.eval_sb3 <model>.zip`, or retrain them on `original_20it`.
+3. **No GPU quota left:** `train_parallel.py` with `SoFetchVecEnv` on a laptop. That's 3× the baseline, exact physics.
+4. **Dropped:** `full` physics for training, our own PyTorch PPO (`so_arm_warp.train`, kept for reference), MJX/Brax
+   (branch `carlgpu`), TPU, Apple Metal, and the thread-pool env.
