@@ -2,14 +2,14 @@
 Send training jobs to Kaggle from the command line, check on them and download the results.
 Wraps the official Kaggle CLI (`pip install kaggle`). See docs/KAGGLE.md for setup.
 
-    python tools/kaggle_job.py submit --name so100-carl-rewards --exp carl-default:default --exp carl-exact:default:original
+    python tools/kaggle_job.py submit --name so100-carl-rewards --exp carl-default:default --exp carl-fast:default:full_elliptic
     python tools/kaggle_job.py status so100-carl-rewards
     python tools/kaggle_job.py logs so100-carl-rewards            # streams the live log (Ctrl-C to stop)
     python tools/kaggle_job.py download so100-carl-rewards        # -> kaggle_results/so100-carl-rewards/
     python tools/kaggle_job.py submit --name so100-carl-rewards --resume-from so100-carl-rewards ...   # continue training
 
-Each job is a private Kaggle notebook running kaggle_train_warp.ipynb on GPU T4 x2: up to two experiments,
-one per GPU. The code is cloned from --branch on GitHub, so push your branch (e.g. with a new reward) first.
+Each job is a private Kaggle notebook running kaggle_train_warp.ipynb (SB3 PPO on MuJoCo Warp) on GPU T4 x2: up to
+two experiments, one per GPU. The code is cloned from --branch on GitHub, so push your branch (e.g. with a new reward) first.
 
 Credentials: ~/.kaggle/kaggle.json, or KAGGLE_USERNAME + KAGGLE_API_TOKEN (or KAGGLE_KEY) in the environment,
 or --env-file path/to/.env containing them. Keys are never printed.
@@ -92,7 +92,7 @@ def submit(a):
         src = a.resume_from if "/" in a.resume_from else f"{user}/{a.resume_from}"
         sources.append(src)
         mount = src.split("/")[1]
-        resume = {r: f"/kaggle/input/{mount}/results/{r}/model_final.pt" for r, _, _ in experiments}
+        resume = {r: f"/kaggle/input/{mount}/results/models/{r}/final.zip" for r, _, _ in experiments}
 
     nb = json.load(open(NOTEBOOK))
     idx = next(i for i, c in enumerate(nb["cells"]) if "EXPERIMENTS = [" in "".join(c["source"]))
@@ -145,11 +145,11 @@ def main():
     s = sub.add_parser("submit", help="send a training job")
     s.add_argument("--name", required=True, help="job (notebook) name; reusing a name adds a new version")
     s.add_argument("--exp", action="append", required=True, help="RUN_NAME:REWARD[:CASE], once or twice")
-    s.add_argument("--case", default="full", help="default physics case for --exp without one")
-    s.add_argument("--branch", default=current_branch() or "warp-training", help="GitHub branch to clone")
+    s.add_argument("--case", default="original_20it", help="default physics case for --exp without one")
+    s.add_argument("--branch", default=current_branch() or "main", help="GitHub branch to clone")
     s.add_argument("--hours", type=float, default=11.0)
     s.add_argument("--num-envs", type=int, default=8192)
-    s.add_argument("--resume-from", default=None, help="earlier job name whose results/<run>/model_final.pt to continue")
+    s.add_argument("--resume-from", default=None, help="earlier job name whose results/models/<run>/final.zip to continue")
     s.add_argument("--accelerator", default="NvidiaTeslaT4")
     s.add_argument("--dir", default=None, help="where to write the job folder (default: a temp dir)")
     s.add_argument("--dry-run", action="store_true")
