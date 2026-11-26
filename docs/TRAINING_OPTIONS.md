@@ -63,6 +63,37 @@ Each option is compared with the exact original physics on CPU MuJoCo (`python -
 - **`full` keeps every original collision shape** and only uses a cheaper contact solver: a pyramidal friction cone and 20 iterations instead of 100. `filtered` and `simplified` also drop collision checks that don't matter for the task. Masses, joints and motors are identical in every case.
 - **The drift column measures sensitivity, not error.** Contact-heavy random motion is chaotic, so tiny differences grow. The tests that represent the task (grasp, push, leaks) all pass.
 
+## D. SB3 PPO on Warp (`vec_env_backend = "warp"`)
+
+`SoFetchWarpVecEnv` (`so_arm_warp/sb3_vec_env.py`) puts the Warp env behind SB3's VecEnv API. It uses the same 64-step actions, observation and reward as `SoFetchEnv`, and works inside `VecMonitor` and `VecNormalize`. Measured on one Kaggle T4 (`python -m so_arm_warp.sb3_bench`):
+
+| SB3 setup | Training steps/s | Notes |
+|---|---|---|
+| 1,024 envs, main's PPO settings (batch 64) | 733 | ❌ 97% of the time goes to ~2,500 tiny gradient steps per update |
+| 4,096 envs, batch 4,096, 10 epochs | 26k | |
+| **8,192 envs, batch 8,192, 10 epochs** | **39k** | `train_parallel.py` default for `"warp"` |
+| 8,192 envs, batch 16,384, 5 epochs | 61k | Same speed as our PyTorch PPO |
+| 8,192 envs, batch 8,192, `original` physics | 9.1k | Exact physics: ~1.3× SB3 + `SoFetchVecEnv` |
+| Adapter only, random actions (`full` / `original`) | 96k / 10k | |
+
+**40-minute learning run, same T4, `full` physics, `default` reward:**
+
+| Trainer | Steps in 40 min | Grasp rate at the end | Success rate | Episode return |
+|---|---|---|---|---|
+| SB3 PPO on Warp (8,192 envs, batch 8,192) | 75M | **99.8%** (from ~17 min) | 0% | +1.8 |
+| Our PyTorch PPO on Warp (8,192 envs) | 147M | 0.02% | 0% | −20.7 |
+
+- **SB3 learned the grasp bonus and our PPO didn't,** despite our PPO taking twice as many steps. The likely reasons are SB3's discrete actions and reward normalisation. "Grasp" here means the PPO8 bonus: the jaw centre within 3 cm of the cube with the jaws at least 4 cm open. Neither run moved the cube to the goal.
+- **⚠️ Policies trained on `full` physics don't transfer to exact physics.** The same SB3 model, played back for 20 episodes:
+
+  | Played on | Grasp (deterministic) | Grasp (sampled) |
+  |---|---|---|
+  | Warp `full` | 20/20 | 20/20 |
+  | Warp `original` | 0/20 | 12/20 |
+  | CPU `SoFetchEnv` | 0/20 | 6/20 |
+
+  The adapter is consistent: Warp `original` and the CPU env agree. The gap comes from `full`'s cheaper contact solver and larger timestep, and the policy relies on those. **Train on `original`, or at least check every model on it.**
+
 ## Caveats
 
 - **Only speed is compared.** Warp uses continuous actions and our own PyTorch PPO, while SB3 uses 64 discrete action steps per motor. We haven't yet compared how many steps each needs to actually solve the task.
