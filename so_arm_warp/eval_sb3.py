@@ -21,18 +21,19 @@ from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv  # noqa: E402
 
 def evaluate(model_path, stats=None, episodes=20, deterministic=True, video=None):
     stats = stats or model_path.replace("/models/", "/vec_norm_stats/").replace(".zip", ".pkl")
-    if video:   # offscreen rendering needs EGL/OSMesa on Linux (MUJOCO_GL=egl on Kaggle); skip the video if it fails
+    venv = VecNormalize.load(stats, DummyVecEnv([SoFetchEnv]))
+    venv.training, venv.norm_reward = False, False
+    renderer = None
+    if video:   # mujoco.Renderer directly (as so_arm_warp.play): needs offscreen GL, e.g. MUJOCO_GL=egl on Kaggle
         try:
-            probe = SoFetchEnv(render_mode="rgb_array")
-            probe.reset()
-            probe.render()
-            probe.close()
+            import mujoco
+            env = venv.venv.envs[0].unwrapped
+            renderer = mujoco.Renderer(env.model, 480, 640)
+            cam = mujoco.MjvCamera(); cam.lookat[:] = [0.0, -0.2, 0.05]
+            cam.distance, cam.azimuth, cam.elevation = 0.95, 120.0, -35.0
         except Exception as e:
             print("Offscreen rendering unavailable, evaluating without video:", type(e).__name__, e)
-            video = None
-    render = "rgb_array" if video else None
-    venv = VecNormalize.load(stats, DummyVecEnv([lambda: SoFetchEnv(render_mode=render)]))
-    venv.training, venv.norm_reward = False, False
+            renderer = None
     model = PPO.load(model_path, device="cpu")
     grasps = succ = 0
     rets, frames = [], []
@@ -44,14 +45,15 @@ def evaluate(model_path, stats=None, episodes=20, deterministic=True, video=None
             ret += float(venv.get_original_reward()[0])
             g |= info[0].get("rew_grasp", 0) > 0
             s |= info[0].get("rew_success", 0) > 0
-            if video:
-                frames.append(venv.venv.envs[0].render())
+            if renderer is not None:
+                renderer.update_scene(env.data, camera=cam)
+                frames.append(renderer.render())
             if done[0]:
                 break
         grasps += g; succ += s; rets.append(ret)
     print(f"{os.path.basename(model_path)} on CPU SoFetchEnv ({'deterministic' if deterministic else 'sampled'}): "
           f"grasp {grasps}/{episodes}, success {succ}/{episodes}, mean return {np.mean(rets):+.2f}")
-    if video and frames:
+    if renderer is not None and frames:
         import imageio
         imageio.mimsave(video, frames, fps=25)   # 20 substeps x 2 ms = 40 ms per step
         print("Wrote", video)
