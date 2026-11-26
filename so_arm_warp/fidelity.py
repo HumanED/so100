@@ -44,7 +44,8 @@ class WarpSim(Sim):
         self.d.ctrl[:] = ctrl
         out = []
         with wp.ScopedDevice(self.device):
-            dw = mjw.put_data(self.m, self.d, nworld=1, naconmax=self.pc.contacts(), njmax=self.pc.njmax)
+            # single world: be generous (scripted tests teleport the cube into contact-heavy states)
+            dw = mjw.put_data(self.m, self.d, nworld=1, naconmax=max(64, self.pc.contacts()), njmax=max(256, self.pc.njmax))
             for _ in range(int(round(seconds / 0.04))):
                 for _ in range(steps_per_env):
                     if hold_cube_at is not None:
