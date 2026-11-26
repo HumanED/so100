@@ -114,10 +114,19 @@ class FetchWarpEnv:
         return self.obs
 
     def step(self, action: torch.Tensor):
+        self.step_launch(action)
+        return self.step_finish()
+
+    def step_launch(self, action: torch.Tensor):
+        """First half of step(): sets the controls and launches the physics without waiting for it, so several
+        envs on different GPUs can run their physics at the same time (SoFetchWarpVecEnv with devices=[...])."""
         self.ctrl.copy_(torch.clamp(self._center + action.clamp(-1, 1) * self._half, self._lo, self._hi))
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)        # torch writes done before Warp reads
-        self.batch.step_env()
+        self.batch.step_env()                          # a CUDA graph launch: returns before the GPU is done
+
+    def step_finish(self):
+        """Second half of step(): waits for the physics, then computes reward, observation and auto-resets."""
         self.wp.synchronize_device(self.batch.device)  # Warp step done before torch reads
         self._fresh[:] = False
         self.t += 1

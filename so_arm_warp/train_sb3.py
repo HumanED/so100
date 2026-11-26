@@ -9,6 +9,7 @@ model and solver with 20 iterations instead of 100, ~2.3x SB3 + SoFetchVecEnv; i
     python -m so_arm_warp.train_sb3 --run-name carl-default-1 --hours 2
     python -m so_arm_warp.train_sb3 --run-name carl-x-1 --reward my_reward --physics full_elliptic --hours 2
     python -m so_arm_warp.train_sb3 --run-name carl-default-2 --resume warp_sb3_out/models/carl-default-1/final.zip
+    python -m so_arm_warp.train_sb3 --run-name carl-focus-1 --gpus 2 --num-envs 16384 --batch-size 16384   # one run, both GPUs
 
 Output (same layout as train_parallel.py, so evaluate_model.py / visualise_model.py can read it):
     <out-dir>/models/<run>/<steps>.zip, final.zip          SB3 checkpoints
@@ -34,15 +35,17 @@ from .sb3_vec_env import SoFetchWarpVecEnv
 
 def train(run_name, out_dir="warp_sb3_out", physics="original_20it", reward="default", num_envs=8192, n_steps=16,
           batch_size=8192, n_epochs=10, hours=None, total_steps=10**12, save_every_steps=25_000_000, resume=None,
-          device=None, seed=1):
+          device=None, seed=1, gpus=1):
     models, stats, logs = (os.path.join(out_dir, d) for d in ("models", "vec_norm_stats", "logs"))
     for d in (models, stats, logs):
         os.makedirs(os.path.join(d, run_name), exist_ok=True)
     cfg = dict(run_name=run_name, physics=physics, reward=reward, num_envs=num_envs, n_steps=n_steps,
-               batch_size=batch_size, n_epochs=n_epochs, resume=resume, seed=seed)
+               batch_size=batch_size, n_epochs=n_epochs, resume=resume, seed=seed, gpus=gpus)
     json.dump(cfg, open(os.path.join(logs, run_name, "config.json"), "w"), indent=1)
 
-    venv = VecMonitor(SoFetchWarpVecEnv(num_envs, physics=physics, reward=reward, device=device, seed=seed))
+    devices = [f"cuda:{i}" for i in range(gpus)] if gpus > 1 else None   # num_envs is split evenly across them
+    venv = VecMonitor(SoFetchWarpVecEnv(num_envs, physics=physics, reward=reward, device=device, seed=seed,
+                                        devices=devices))
     dev = str(venv.venv.device)
     if resume:
         venv = VecNormalize.load(resume.replace("/models/", "/vec_norm_stats/").replace(".zip", ".pkl"), venv)
@@ -54,7 +57,8 @@ def train(run_name, out_dir="warp_sb3_out", physics="original_20it", reward="def
         venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=10.0)
         model = PPO("MlpPolicy", venv, n_steps=n_steps, batch_size=batch_size, n_epochs=n_epochs, device=dev,
                     seed=seed, tensorboard_log=logs, verbose=0)
-    print(f"Training '{run_name}': physics={physics} reward={reward} envs={num_envs} on {dev}", flush=True)
+    print(f"Training '{run_name}': physics={physics} reward={reward} envs={num_envs} on {dev}"
+          + (f" (physics split over {gpus} GPUs)" if gpus > 1 else ""), flush=True)
 
     timing = Timing(csv=os.path.join(logs, run_name, "log.csv"))
     t0, next_save = time.time(), (model.num_timesteps // save_every_steps + 1) * save_every_steps
@@ -91,9 +95,10 @@ def main():
     p.add_argument("--resume", default=None, help="a .zip under .../models/<run>/; its .pkl is found in vec_norm_stats")
     p.add_argument("--device", default=None)
     p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--gpus", type=int, default=1, help="split this run's envs over this many GPUs (cuda:0..N-1)")
     a = p.parse_args()
     train(a.run_name, a.out_dir, a.physics, a.reward, a.num_envs, a.n_steps, a.batch_size, a.n_epochs, a.hours,
-          a.total_steps, a.save_every_steps, a.resume, a.device, a.seed)
+          a.total_steps, a.save_every_steps, a.resume, a.device, a.seed, a.gpus)
 
 
 if __name__ == "__main__":
