@@ -33,11 +33,12 @@ function) has to be **pushed to a branch** first.
    NUM_ENVS = 8192                   # parallel envs per GPU
    EXPERIMENTS = [                   # one per GPU
        dict(run_name="carl-default-1", reward="default", case="full"),
-       dict(run_name="carl-padmid-1", reward="pad_midpoint", case="full"),
+       dict(run_name="carl-exact-1", reward="default", case="original"),
    ]
    RESUME = {}
    ```
-   - **`reward`:** a name from `so_arm_warp/rewards.py` (`default`, `pad_midpoint`, or your own).
+   - **`reward`:** a name from `so_arm_warp/rewards.py`: `default` (exactly `SoFetchEnv`'s reward), `legacy` (the
+     pre-PPO7 reward), or your own.
    - **`case`:** the physics option: `full` (default), `original` (exact CPU-env physics, slower), `filtered` or `simplified`.
 5. Click **Save Version → Save & Run All (Commit) → Save**. The job then runs in the background, and you can close the
    browser.
@@ -72,7 +73,7 @@ Use one of these. **Never commit credentials.**
 ```bash
 # Start a job: two experiments, one per T4, running the code on branch warp-training
 python tools/kaggle_job.py submit --name so100-carl-rewards \
-    --exp carl-default-1:default --exp carl-padmid-1:pad_midpoint
+    --exp carl-default-1:default --exp carl-exact-1:default:original
 
 # Other options
 #   --exp RUN:REWARD:CASE     choose physics per run, e.g. carl-exact-1:default:original
@@ -86,7 +87,7 @@ python tools/kaggle_job.py download so100-carl-rewards     # -> kaggle_results/s
 
 # Continue both runs from that job's final checkpoints, in a new job
 python tools/kaggle_job.py submit --name so100-carl-rewards-2 --resume-from so100-carl-rewards \
-    --exp carl-default-1:default --exp carl-padmid-1:pad_midpoint
+    --exp carl-default-1:default --exp carl-exact-1:default:original
 ```
 
 Some rules to know:

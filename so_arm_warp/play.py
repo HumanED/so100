@@ -46,7 +46,7 @@ def main():
     q0, v0, c0 = settled_initial_state(m, fcfg)
     d = mujoco.MjData(m)
     idx = ObsIndices.from_model(m)
-    pads = [m.geom(f"{s}_jaw_pad_{i}").id for s in ("fixed", "moving") for i in (3, 4)]
+    top, bottom = m.site("jaw_top_site").id, m.site("jaw_bottom_site").id
     goal = np.asarray(cfg["fixed_goal"] if cfg["fixed_goal"] is not None else np.random.uniform(0.1, 0.5, 3))
     tgt = m.joint("target:joint")
     lo, hi = m.actuator_ctrlrange[:, 0], m.actuator_ctrlrange[:, 1]
@@ -72,7 +72,7 @@ def main():
         mujoco.mj_resetData(m, d)
         d.qpos[:], d.qvel[:], d.ctrl[:] = q0, v0, c0
         mujoco.mj_forward(m, d)
-        best_goal, gripped, lifted = 1e9, False, False
+        best_goal, grasped, lifted = 1e9, False, False
         for _ in range(100):
             t = time.time()
             act = ac.act_deterministic(torch.as_tensor(obs(), dtype=torch.float32)[None])[0].numpy()
@@ -82,8 +82,9 @@ def main():
                 d.qpos[tgt.qposadr[0]:tgt.qposadr[0] + 7] = np.concatenate([goal, [1, 0, 0, 0]])  # show the goal marker
                 d.qvel[tgt.dofadr[0]:tgt.dofadr[0] + 6] = 0
             cube = d.qpos[idx.object_qpos[:3]]
-            pad_mid = 0.5 * (d.geom_xpos[pads[:2]].mean(0) + d.geom_xpos[pads[2:]].mean(0))
-            gripped |= np.linalg.norm(cube - pad_mid) < 0.015
+            # grasp / success as in SoFetchEnv's reward: jaw centre within 3 cm with jaws >= 4 cm open; cube within 2 cm
+            width = np.linalg.norm(d.site_xpos[top] - d.site_xpos[bottom])
+            grasped |= np.linalg.norm(cube - d.site_xpos[idx.jaw_site]) < 0.03 and width >= 0.04
             lifted |= cube[2] > 0.05
             best_goal = min(best_goal, np.linalg.norm(cube - goal))
             if renderer:
@@ -93,8 +94,8 @@ def main():
                     return
                 viewer.sync(); time.sleep(max(0.0, dt - (time.time() - t)))
         n += 1
-        print(f"episode {n}: cube in gripper {gripped} | lifted {lifted} | closest to goal {best_goal * 100:.1f} cm "
-              f"| success {best_goal < 0.002}")
+        print(f"episode {n}: grasp {grasped} | cube lifted {lifted} | closest to goal {best_goal * 100:.1f} cm "
+              f"| success {best_goal < 0.02}")
     if a.video and frames:
         import imageio
         imageio.mimsave(a.video, frames, fps=int(round(1 / dt)))

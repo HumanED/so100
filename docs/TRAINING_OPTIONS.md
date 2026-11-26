@@ -8,6 +8,11 @@ on an Apple M3 laptop (8 cores) and on free Kaggle notebooks (2× NVIDIA T4 GPUs
 once, one per GPU. It can use all of the original collision shapes, and every physics option passed the grasp test.
 For running it, see [KAGGLE.md](KAGGLE.md).
 
+**Measured before the PPO7/PPO8 changes on `main`:** 11 action bins, the older reward, and the scene without the
+two jaw sites. The physics (masses, joints, collision shapes, solver) is unchanged, so all speeds and fidelity results
+still apply. Everything on `warp-training` now trains `main`'s current task. `SoFetchVecEnv` and the Warp
+`default` reward are checked against `SoFetchEnv` by the tests in `tests/`.
+
 **Baseline ("1.0×"):** the original setup, `train_parallel.py` with SB3 PPO, 8 `SubprocVecEnv` workers and
 batch size 64 on the M3, at **2,400 training steps/s** (counting the PPO updates).
 
@@ -60,10 +65,9 @@ Each option is compared with the exact original physics on CPU MuJoCo (`python -
 
 ## Caveats
 
-- **Only speed is compared.** Warp uses continuous actions and our own PyTorch PPO, while SB3 uses 11 discrete action steps per motor. We haven't yet compared how many steps each needs to actually solve the task.
+- **Only speed is compared.** Warp uses continuous actions and our own PyTorch PPO, while SB3 uses 64 discrete action steps per motor. We haven't yet compared how many steps each needs to actually solve the task.
 - **PPO settings are untuned,** and the longest Warp training run so far is 15 minutes.
-- **The default reward's +20 grasp bonus is effectively unreachable.** It needs the cube centre within 4 mm of `jaw_site`, but `jaw_site` sits 1.4 cm from the fixed jaw's pads and the cube is 4 cm wide, so in a real grip the centre is about 1.2 cm away. The `pad_midpoint` reward measures from the midpoint between the pads with a 1.5 cm threshold, and it already registers grasps (0.7% of episodes after 15 minutes).
-- **The old CPU env pays its bonuses only once per worker lifetime,** because `reset()` never re-arms them. The Warp rewards re-arm them every episode.
+- **Two reward problems from the old env are fixed on `main` (PPO7/PPO8).** The +20 grasp bonus used to be unreachable: it needed the cube centre within 4 mm of `jaw_site`, which sits 1.4 cm from the fixed jaw's pads. Bonuses were also paid only once per worker lifetime. The current reward uses a 3 cm, jaws-open grasp check and re-arms the bonuses every episode. Warp's `default` reward is that same reward, and `legacy` keeps the old one for comparison.
 
 ## Recommendation
 

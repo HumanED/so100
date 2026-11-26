@@ -43,11 +43,12 @@ cells = [
     md("""
 # SO-100 Fetch: PPO training on Kaggle
 
-Trains PPO (stable-baselines3) on `SoFetchEnv`, using the same wrappers as `train_parallel.py`,
-so the saved `.zip` models load with `visualise_model.py` without changes.
+Trains PPO (stable-baselines3) on `SoFetchEnv` with the same setup as `train_parallel.py` (`VecMonitor` +
+`VecNormalize`). Checkpoints are saved as `models/<run>/<steps>.zip` with `vec_norm_stats/<run>/<steps>.pkl`,
+the layout `visualise_model.py` expects.
 
 By default all envs run in one process with `SoFetchVecEnv` (MuJoCo's multithreaded rollout, no worker processes).
-It's about 1.7x faster than one process per env, and its observations/rewards match the wrapped `SoFetchEnv`.
+It's about 1.7x faster than one process per env, with the same observations, rewards and infos as `SoFetchEnv`.
 Set `VEC_ENV = "subproc"` for the original `SubprocVecEnv`.
 
 **Kaggle settings (right sidebar)**
@@ -101,18 +102,14 @@ PPO_KWARGS = dict(
 if NET_ARCH is not None:
     PPO_KWARGS["policy_kwargs"] = dict(net_arch=NET_ARCH)
 
-# The env never resets grasp_reward / target_reached_reward in reset(), so each worker
-# can only earn those bonuses ONCE in its whole lifetime. Set True to re-arm them every episode.
-# Left False so results stay comparable with earlier runs.
-FIX_ONE_TIME_BONUS_BUG = False
-
 RECORD_VIDEO = True                       # record an evaluation video at the end (may fail without EGL)
 
 WORK = "/kaggle/working" if os.path.isdir("/kaggle/working") else os.path.abspath("kaggle_out")
 MODELS_DIR = os.path.join(WORK, "models")
+STATS_DIR = os.path.join(WORK, "vec_norm_stats")   # VecNormalize mean/std, saved next to each checkpoint
 LOGS_DIR = os.path.join(WORK, "logs")
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.makedirs(LOGS_DIR, exist_ok=True)
+for _d in (MODELS_DIR, STATS_DIR, LOGS_DIR):
+    os.makedirs(_d, exist_ok=True)
 print("Output dir:", WORK, "| envs:", N_ENVS, "| device:", DEVICE)
 """),
     md("## Install the `so_arm_rl` environment package (embedded)"),
@@ -136,43 +133,25 @@ print("Extracted to", SRC_DIR)
 import glob, re, time
 import numpy as np
 import matplotlib.pyplot as plt
-from gymnasium.wrappers import NormalizeObservation, TransformObservation
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor, VecNormalize
 from so_arm_rl.envs.fetch.so_arm_fetch_vec_env import SoFetchVecEnv
-from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 
 from so_arm_rl.envs.fetch.so_arm_fetch_env import SoFetchEnv
 
 
-class PatchedSoFetchEnv(SoFetchEnv):
-    \"\"\"Re-arms the one-time grasp / target bonuses on every reset.\"\"\"
-    def reset(self, *, seed=None, options=None):
-        self.grasp_reward = 20
-        self.target_reached_reward = 30
-        return super().reset(seed=seed, options=options)
-
-
-def clip_observation(obs):
-    \"\"\"Clip to within 5 std of the mean (section D.1 of the OpenAI paper), same as train_parallel.py\"\"\"
-    return np.clip(obs, a_min=obs.mean() - 5 * obs.std(), a_max=obs.mean() + 5 * obs.std())
-
-
-def make_env(rank=0, render_mode=None, fix_bonus=FIX_ONE_TIME_BONUS_BUG):
+def make_env(rank=0, render_mode=None):
+    \"\"\"Same as train_parallel.make_env: the raw env (normalisation and monitoring happen on the VecEnv)\"\"\"
     def _init():
-        env_cls = PatchedSoFetchEnv if fix_bonus else SoFetchEnv
-        env = env_cls(render_mode=render_mode)
-        env = NormalizeObservation(env)
-        env = TransformObservation(env, clip_observation, env.observation_space)
-        env = Monitor(env)
+        env = SoFetchEnv(render_mode=render_mode)
         env.reset(seed=SEED + rank)
         return env
     return _init
 
 
 class TensorboardCallback(BaseCallback):
-    \"\"\"Logs mean per-episode sub-rewards (rew_*) of env 0, same as train_parallel.py\"\"\"
+    \"\"\"Logs mean per-episode sub-rewards (rew_* and debug_*) of env 0, same as train_parallel.py\"\"\"
     def __init__(self, verbose=0):
         super().__init__(verbose)
         self.episode_count = 0
@@ -183,7 +162,7 @@ class TensorboardCallback(BaseCallback):
     def _on_training_start(self):
         self.max_t = self.training_env.get_attr("MAX_TIMESTEPS")[0]
         for k in self.training_env.get_attr("info")[0]:
-            if k.startswith("rew_"):
+            if k.startswith("rew_") or k.startswith("debug_"):
                 self.sub_rews_cumul[k] = 0
                 self.sub_rews_buffer[k] = np.zeros(self.max_t)
 
@@ -213,15 +192,16 @@ class TensorboardCallback(BaseCallback):
 
 class CheckpointAndTimeLimit(BaseCallback):
     \"\"\"Saves every SAVE_INTERVAL timesteps and stops cleanly before the Kaggle time limit.\"\"\"
-    def __init__(self, save_dir, interval, start_saving, time_limit_s):
+    def __init__(self, save_dir, stats_dir, interval, start_saving, time_limit_s):
         super().__init__()
-        self.save_dir, self.interval, self.start_saving = save_dir, interval, start_saving
+        self.save_dir, self.stats_dir, self.interval, self.start_saving = save_dir, stats_dir, interval, start_saving
         self.time_limit_s = time_limit_s
         self.t0 = time.time()
         self.next_save = None
 
     def _on_training_start(self):
         os.makedirs(self.save_dir, exist_ok=True)
+        os.makedirs(self.stats_dir, exist_ok=True)
         # first multiple of interval past current timestep count (works when resuming)
         self.next_save = (self.num_timesteps // self.interval + 1) * self.interval
 
@@ -230,6 +210,7 @@ class CheckpointAndTimeLimit(BaseCallback):
             if self.num_timesteps >= self.start_saving:
                 path = os.path.join(self.save_dir, str(self.next_save))
                 self.model.save(path)
+                self.model.get_vec_normalize_env().save(os.path.join(self.stats_dir, f"{self.next_save}.pkl"))
                 elapsed = (time.time() - self.t0) / 3600
                 print(f"[ckpt] {self.next_save:,} steps -> {path}.zip  ({elapsed:.2f} h elapsed)")
             self.next_save += self.interval
@@ -276,25 +257,33 @@ def resolve_resume(path):
     return path
 
 run_models_dir = os.path.join(MODELS_DIR, RUN_NAME)
+run_stats_dir = os.path.join(STATS_DIR, RUN_NAME)
 resume_path = resolve_resume(RESUME_FROM)
 if resume_path is None and glob.glob(os.path.join(run_models_dir, "*.zip")):
     raise RuntimeError(f"{run_models_dir} already has checkpoints; change RUN_NAME or set RESUME_FROM")
 
 if VEC_ENV == "single_process":
-    env = SoFetchVecEnv(N_ENVS, fix_bonus_bug=FIX_ONE_TIME_BONUS_BUG)
+    env = SoFetchVecEnv(N_ENVS)
 else:
     env = SubprocVecEnv([make_env(i) for i in range(N_ENVS)]) if N_ENVS > 1 else DummyVecEnv([make_env(0)])
+env = VecMonitor(env)
 
 if resume_path:
-    print("Resuming from", resume_path)
+    # VecNormalize stats live in vec_norm_stats/<run>/<steps>.pkl next to models/<run>/<steps>.zip
+    stats = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(resume_path))), "vec_norm_stats",
+                         os.path.basename(os.path.dirname(resume_path)), os.path.basename(resume_path)[:-4] + ".pkl")
+    print("Resuming from", resume_path, "with", stats)
+    env = VecNormalize.load(stats, env)
+    env.training, env.norm_reward = True, True
     model = PPO.load(resume_path, env=env, device=DEVICE, seed=SEED, tensorboard_log=LOGS_DIR,
-                     custom_objects={"n_steps": PPO_KWARGS["n_steps"]})
+                     custom_objects={"n_steps": PPO_KWARGS["n_steps"], "lr_schedule": 3e-4, "clip_range": 0.2})
 else:
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)   # same as train_parallel.py
     model = PPO("MlpPolicy", env, device=DEVICE, seed=SEED, tensorboard_log=LOGS_DIR, verbose=1, **PPO_KWARGS)
 
 callbacks = CallbackList([
     TensorboardCallback(),
-    CheckpointAndTimeLimit(run_models_dir, SAVE_INTERVAL, START_SAVING, TIME_LIMIT_HOURS * 3600),
+    CheckpointAndTimeLimit(run_models_dir, run_stats_dir, SAVE_INTERVAL, START_SAVING, TIME_LIMIT_HOURS * 3600),
 ])
 
 t0 = time.time()
@@ -311,6 +300,9 @@ except KeyboardInterrupt:
 finally:
     final_path = os.path.join(run_models_dir, f"{model.num_timesteps}_final")
     model.save(final_path)
+    os.makedirs(run_stats_dir, exist_ok=True)
+    final_stats = os.path.join(run_stats_dir, f"{model.num_timesteps}_final.pkl")
+    env.save(final_stats)
     env.close()
     print(f"Saved final model -> {final_path}.zip | {model.num_timesteps:,} timesteps in {(time.time()-t0)/3600:.2f} h")
 """),
@@ -334,48 +326,49 @@ else:
 """),
     md("## Evaluate (+ optional video)"),
     code("""
-eval_model = PPO.load(final_path, device=DEVICE)
-returns, successes, frames = [], [], []
-
+# Same as visualise_model.py: frozen VecNormalize stats, unnormalised rewards
 if RECORD_VIDEO:
     os.environ.setdefault("MUJOCO_GL", "egl")
+def make_eval(render):
+    venv = VecNormalize.load(final_stats, DummyVecEnv([make_env(rank=100, render_mode="rgb_array" if render else None)]))
+    venv.training, venv.norm_reward = False, False
+    return venv
 try:
-    eval_env = make_env(rank=100, render_mode="rgb_array" if RECORD_VIDEO else None)()
+    eval_env = make_eval(RECORD_VIDEO)
 except Exception as e:
     print("Render env failed, evaluating without video:", e)
     RECORD_VIDEO = False
-    eval_env = make_env(rank=100)()
-
+    eval_env = make_eval(False)
+eval_model = PPO.load(final_path, env=eval_env, device=DEVICE)
+returns, successes, frames = [], [], []
 for ep in range(5):
-    obs, info = eval_env.reset()
-    done, ep_ret = False, 0.0
+    obs, ep_ret, done = eval_env.reset(), 0.0, False
     while not done:
         action, _ = eval_model.predict(obs, deterministic=True)
-        obs, r, term, trunc, info = eval_env.step(action)
-        ep_ret += r
-        done = term or trunc
+        obs, r, d, infos = eval_env.step(action)
+        ep_ret += float(r[0]); done = bool(d[0])
         if RECORD_VIDEO and ep == 0:
             try:
-                frames.append(eval_env.render())
+                frames.append(eval_env.venv.envs[0].render())
             except Exception as e:
                 print("Rendering failed, skipping video:", e); RECORD_VIDEO = False
-    returns.append(ep_ret); successes.append(info.get("is_success", 0))
+    returns.append(ep_ret); successes.append(infos[0].get("is_success", 0))
 eval_env.close()
 print(f"Mean return {np.mean(returns):.2f} | success rate {np.mean(successes):.0%}")
 
 if frames:
     import imageio
     vid = os.path.join(WORK, f"{RUN_NAME}_eval.mp4")
-    imageio.mimsave(vid, frames, fps=int(round(1 / info["dt"])))
+    imageio.mimsave(vid, frames, fps=25)   # 20 substeps x 2 ms = 40 ms per step
     print("Video saved ->", vid)
 """),
-    md("## Package outputs\n\n`results.zip` has `models/` and `logs/`. Download it from the Output tab and unzip it into the repo root, so `visualise_model.py` can find the models."),
+    md("## Package outputs\n\n`results.zip` has `models/`, `vec_norm_stats/` and `logs/`. Download it from the Output tab and unzip it into the repo root, so `visualise_model.py` can find the models."),
     code("""
 # zip only models + logs (not the extracted source)
 import zipfile
 zip_path = os.path.join(WORK, "results.zip")
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-    for sub in ("models", "logs"):
+    for sub in ("models", "vec_norm_stats", "logs"):
         for root, _, files in os.walk(os.path.join(WORK, sub)):
             for f in files:
                 full = os.path.join(root, f)

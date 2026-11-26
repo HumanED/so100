@@ -1,7 +1,7 @@
 """
 Train PPO on the Warp fetch env (NVIDIA GPU):
 
-    python -m so_arm_warp.train --run-name carl-padmid-1 --reward pad_midpoint --case full --num-envs 8192 --hours 11
+    python -m so_arm_warp.train --run-name carl-default-1 --reward default --case full --num-envs 8192 --hours 11
 
 Writes to <out-dir>/<run-name>/:
     config.json         everything needed to rebuild the env and policy
@@ -22,11 +22,12 @@ from .env import FetchWarpEnv
 from .physics import CASES, PhysicsConfig
 from .ppo import PPO, PPOConfig
 from .rewards import REWARDS
+from .scene import FIXED_GOAL
 
 
 def train(run_name, out_dir="warp_out", case="full", reward="default", num_envs=8192, total_steps=2_000_000_000,
           hours=None, save_every_steps=50_000_000, resume=None, device=None, seed=0, ls_iterations=50,
-          fixed_goal=(-0.3, -0.2, 0.025), ppo_cfg: PPOConfig = PPOConfig(), log_every=1):
+          fixed_goal=FIXED_GOAL, ppo_cfg: PPOConfig = PPOConfig(), log_every=1):
     torch.manual_seed(seed)
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
@@ -120,7 +121,7 @@ def main():
     p.add_argument("--random-goal", action="store_true")
     a = p.parse_args()
     train(a.run_name, a.out_dir, a.case, a.reward, a.num_envs, a.total_steps, a.hours, a.save_every_steps,
-          a.resume, a.device, a.seed, fixed_goal=None if a.random_goal else (-0.3, -0.2, 0.025))
+          a.resume, a.device, a.seed, fixed_goal=None if a.random_goal else FIXED_GOAL)
 
 
 if __name__ == "__main__":

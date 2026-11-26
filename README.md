@@ -3,6 +3,8 @@
 The task (`SoFetchEnv`): the SO-100 arm reaches for a cube, grasps it and moves it to a target, simulated in
 MuJoCo. See the HumanED notion page for installation instructions.
 
+For imitation learning on the SO-101 with LeRobot, see [imitation_learning/](imitation_learning/README.md).
+
 ## How to train
 
 | | Where | Speed | Docs |
@@ -20,7 +22,7 @@ The full comparison of everything we tested, including speeds, physics fidelity 
 - **On any NVIDIA machine:** `pip install mujoco==4.0.1 mujoco-warp==4.0.1 torch`, then
   `python -m so_arm_warp.train --run-name me-1 --reward default --case full --hours 2`.
 - **Reward experiments:** add a class to [`so_arm_warp/rewards.py`](so_arm_warp/rewards.py) and pass `--reward <name>`.
-  `pad_midpoint` fixes the default reward's grasp check, which a real grip can't satisfy.
+  `default` is exactly `SoFetchEnv`'s current reward (checked by `tests/test_warp_reward.py`); `legacy` is the pre-PPO7 one.
 - **Physics (`--case`):**
   - `full` (default): all original collision shapes, cheaper solver.
   - `original`: exactly the CPU env's physics, about 3× slower.
@@ -31,12 +33,14 @@ The full comparison of everything we tested, including speeds, physics fidelity 
 
 ### CPU training with Stable-Baselines3 (fallback)
 
-- **Laptop:** `python train_parallel.py`. Set the run name at the top of the file. By default it runs 32 envs in one
-  process with `SoFetchVecEnv`, which uses MuJoCo's multithreaded rollout and gives the same observations and rewards
-  as the per-process setup. Set `vec_env_backend = "subproc"` for the old one-process-per-env setup.
+- **Laptop:** `python train_parallel.py` (set the run name at the top). It trains with `VecMonitor` + `VecNormalize`
+  and saves `models/<run>/` and `vec_norm_stats/<run>/`. By default it runs 32 envs in one process with
+  `SoFetchVecEnv`, which uses MuJoCo's multithreaded rollout and gives the same observations, rewards and infos as
+  `SubprocVecEnv` (`tests/test_vec_env.py`). Set `vec_env_backend = "subproc"` for one process per env.
 - **Kaggle CPU (no quota):** upload [`kaggle_train.ipynb`](kaggle_train.ipynb) through the website with
   **Accelerator: None**. Rebuild it after changing the env with `python make_kaggle_notebook.py`.
-- **Watch a model:** `python visualise_model.py` (set `model_folder_zip` at the top).
+- **Watch a model:** `python visualise_model.py` (set the model at the top).
+- **Tests:** `python tests/test_vec_env.py`, `python tests/test_warp_reward.py`, `python tests/test_warp_scene.py` (or `pytest tests/`).
 
 ## Repository layout
 
@@ -48,4 +52,5 @@ The full comparison of everything we tested, including speeds, physics fidelity 
 | `kaggle_train_warp.ipynb` / `make_kaggle_warp_notebook.py` | Kaggle GPU notebook (clones the code from GitHub) and its generator |
 | `kaggle_train.ipynb` / `make_kaggle_notebook.py` | Kaggle CPU notebook (code embedded) and its generator |
 | `train_parallel.py` / `visualise_model.py` | SB3 training and viewing on CPU |
+| `tests/` | `SoFetchVecEnv` and the Warp scene/reward checked against `SoFetchEnv` |
 | `docs/` | [Training options and measurements](docs/TRAINING_OPTIONS.md), [Kaggle guide](docs/KAGGLE.md) |

@@ -39,6 +39,12 @@ _COLLISION_MASKS = {
 _GRIPPER_BODIES = ("Wrist_Pitch_Roll", "Fixed_Jaw", "Moving_Jaw")
 
 
+# Task layout, mirrored from so_arm_rl's SoFetchEnv (tests/test_warp_scene.py fails if they drift apart)
+INITIAL_CUBE_POSITION = (0.25, -0.25, 0.025)
+FIXED_GOAL = (-0.2, -0.25, 0.1)
+GOAL_MIN, GOAL_MAX = (0.1, 0.1, 0.1), (0.5, 0.5, 0.5)
+
+
 @dataclass(frozen=True)
 class FetchConfig:
     n_substeps: int = 20               # physics steps per env step (CPU env: 20)
@@ -46,15 +52,7 @@ class FetchConfig:
     cone: str = "pyramidal"            # "pyramidal" (faster) or "elliptic" (CPU env)
     solver_iterations: int = 20        # CPU env: 100. 10 is too few: grasps slip (fidelity_check.py)
     ls_iterations: int = 20
-    episode_length: int = 100          # CPU env MAX_TIMESTEPS
-    fixed_goal: Optional[Sequence[float]] = (-0.3, -0.2, 0.025)  # None -> uniform in [goal_min, goal_max]
-    goal_min: Sequence[float] = (0.1, 0.1, 0.1)
-    goal_max: Sequence[float] = (0.5, 0.5, 0.5)
-    initial_cube_position: Sequence[float] = (0.3, -0.3, 0.025)
-    grasp_reward: float = 20.0
-    target_reached_reward: float = 30.0
-    grasp_threshold: float = 0.004     # jaw_site <-> cube centre distance counted as a grasp
-    target_threshold: float = 0.002    # cube <-> goal distance counted as success
+    initial_cube_position: Sequence[float] = INITIAL_CUBE_POSITION
     filter_collisions: bool = True     # legacy flag (False == collision_model "full"); kept so old config.json files load
     collision_model: str = "filtered"  # "full", "filtered" or "simplified"; see module docstring
     max_hull_verts: Optional[int] = 32  # "simplified": cap on collision-mesh hull vertices (None = uncapped)

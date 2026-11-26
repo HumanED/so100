@@ -11,7 +11,7 @@ import mujoco
 import numpy as np
 import torch
 
-from .scene import ObsIndices
+from .scene import FIXED_GOAL, GOAL_MAX, GOAL_MIN, ObsIndices
 
 from .physics import PhysicsConfig, WarpBatch
 from .rewards import REWARDS
@@ -19,8 +19,8 @@ from .rewards import REWARDS
 
 class FetchWarpEnv:
     def __init__(self, num_envs: int, physics: PhysicsConfig = PhysicsConfig(), reward: str = "default",
-                 episode_length: int = 100, fixed_goal: Optional[Sequence[float]] = (-0.3, -0.2, 0.025),
-                 goal_low=(0.1, 0.1, 0.1), goal_high=(0.5, 0.5, 0.5), device: Optional[str] = None, seed: int = 0):
+                 episode_length: int = 100, fixed_goal: Optional[Sequence[float]] = FIXED_GOAL,
+                 goal_low=GOAL_MIN, goal_high=GOAL_MAX, device: Optional[str] = None, seed: int = 0):
         import warp as wp
         self.wp = wp
         self.num_envs, self.episode_length = num_envs, episode_length
@@ -37,6 +37,7 @@ class FetchWarpEnv:
         idx = ObsIndices.from_model(m)
         t = lambda a, dt=torch.long: torch.as_tensor(np.asarray(a), dtype=dt, device=self.device)
         self._i_rq, self._i_rv, self._i_obj, self._jaw = t(idx.robot_qpos), t(idx.robot_qvel), t(idx.object_qpos), idx.jaw_site
+        self._jaw_top, self._jaw_bottom = m.site("jaw_top_site").id, m.site("jaw_bottom_site").id
         self._pads = t([m.geom(f"{s}_jaw_pad_{i}").id for s in ("fixed", "moving") for i in (3, 4)])
         lo, hi = t(m.actuator_ctrlrange[:, 0], torch.float32), t(m.actuator_ctrlrange[:, 1], torch.float32)
         self._lo, self._hi, self._center, self._half = lo, hi, (lo + hi) / 2, (hi - lo) / 2
@@ -44,6 +45,8 @@ class FetchWarpEnv:
         # jaw / pad positions at the reset state (Warp's derived quantities aren't recomputed until the next step)
         d = mujoco.MjData(m); d.qpos[:] = self.batch.q0; mujoco.mj_kinematics(m, d)
         self._jaw0 = t(d.site_xpos[idx.jaw_site], torch.float32)
+        self._jaw_top0 = t(d.site_xpos[self._jaw_top], torch.float32)
+        self._jaw_bottom0 = t(d.site_xpos[self._jaw_bottom], torch.float32)
         self._pads0 = t(d.geom_xpos[[m.geom(f"{s}_jaw_pad_{i}").id for s in ("fixed", "moving") for i in (3, 4)]], torch.float32)
 
         self.gen = torch.Generator(device=self.device).manual_seed(seed)
@@ -64,6 +67,14 @@ class FetchWarpEnv:
     @property
     def jaw_pos(self):
         return torch.where(self._fresh[:, None], self._jaw0, self._site_xpos[:, self._jaw])
+
+    @property
+    def jaw_top(self):
+        return torch.where(self._fresh[:, None], self._jaw_top0, self._site_xpos[:, self._jaw_top])
+
+    @property
+    def jaw_bottom(self):
+        return torch.where(self._fresh[:, None], self._jaw_bottom0, self._site_xpos[:, self._jaw_bottom])
 
     @property
     def pad_mid(self):

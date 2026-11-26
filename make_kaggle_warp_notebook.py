@@ -50,7 +50,7 @@ HOURS = 11.0                      # stop each run after this long (Kaggle ends s
 NUM_ENVS = 8192                   # parallel envs per GPU
 EXPERIMENTS = [                   # one per GPU; remove one to train a single run
     dict(run_name="carl-default-1", reward="default", case="full"),
-    dict(run_name="carl-padmid-1", reward="pad_midpoint", case="full"),
+    dict(run_name="carl-exact-1", reward="default", case="original"),
 ]
 RESUME = {{}}                      # e.g. {{"carl-default-1": "/kaggle/input/<prev-job>/results/carl-default-1/model_final.pt"}}
 """),

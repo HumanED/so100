@@ -2,7 +2,7 @@
 Send training jobs to Kaggle from the command line, check on them and download the results.
 Wraps the official Kaggle CLI (`pip install kaggle`). See docs/KAGGLE.md for setup.
 
-    python tools/kaggle_job.py submit --name so100-carl-rewards --exp carl-default:default --exp carl-padmid:pad_midpoint
+    python tools/kaggle_job.py submit --name so100-carl-rewards --exp carl-default:default --exp carl-exact:default:original
     python tools/kaggle_job.py status so100-carl-rewards
     python tools/kaggle_job.py logs so100-carl-rewards            # streams the live log (Ctrl-C to stop)
     python tools/kaggle_job.py download so100-carl-rewards        # -> kaggle_results/so100-carl-rewards/

@@ -4,6 +4,7 @@
 .DS_Store
 .cache
 .pytest_cache/
+typings/
 
 # Setuptools distribution and build folders.
 /dist/
@@ -18,7 +19,7 @@
 *.sublime-project
 *.sublime-workspace
 
-logs/
+
 
 .ipynb_checkpoints
 ghostdriver.log
