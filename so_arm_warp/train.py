@@ -25,7 +25,7 @@ from .rewards import REWARDS
 from .scene import FIXED_GOAL
 
 
-def train(run_name, out_dir="warp_out", case="full", reward="default", num_envs=8192, total_steps=2_000_000_000,
+def train(run_name, out_dir="warp_out", case="original_20it", reward="default", num_envs=8192, total_steps=2_000_000_000,
           hours=None, save_every_steps=50_000_000, resume=None, device=None, seed=0, ls_iterations=50,
           fixed_goal=FIXED_GOAL, ppo_cfg: PPOConfig = PPOConfig(), log_every=1):
     torch.manual_seed(seed)
@@ -109,7 +109,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--run-name", required=True)
     p.add_argument("--out-dir", default="warp_out")
-    p.add_argument("--case", default="full", choices=CASES)
+    p.add_argument("--case", default="original_20it", choices=CASES)
     p.add_argument("--reward", default="default", choices=sorted(REWARDS))
     p.add_argument("--num-envs", type=int, default=8192)
     p.add_argument("--total-steps", type=int, default=2_000_000_000)

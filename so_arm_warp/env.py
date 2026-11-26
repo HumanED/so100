@@ -130,12 +130,14 @@ class FetchWarpEnv:
         done = timeout | bad
 
         metrics = dict(metrics, reward=reward)
+        self.last_metrics = metrics                    # per-step values, read by the SB3 adapter
         for k, v in metrics.items():
             self._ep_sums.setdefault(k, torch.zeros(self.num_envs, device=self.device))
             self._ep_sums[k] += v
         info = {"timeout": timeout & ~bad, "unstable": bad}
         if done.any():
             info["episode"] = {k: v[done].clone() for k, v in self._ep_sums.items()}
+            info["terminal_obs"] = obs[done].clone()   # last obs of each finished episode, before auto-reset
             self._reset_worlds(done)
             obs = torch.where(done[:, None], self.obs, obs)
         return obs, reward, done, info

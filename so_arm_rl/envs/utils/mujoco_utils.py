@@ -58,15 +58,15 @@ def set_joint_qpos(model, data, name, value):
     """Set the joint positions (qpos) of the model. Used in rendering and resetting the model. Not used in hand control"""
     joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
     assert joint_id != -1, f"Joint with name '{name}' is not part of the model!"
-    joint_type = model.jnt_type[joint_id]
+    joint_type = int(model.jnt_type[joint_id])
     joint_addr = model.jnt_qposadr[joint_id]
 
-    if joint_type == mujoco.mjtJoint.mjJNT_FREE:
+    if joint_type == int(mujoco.mjtJoint.mjJNT_FREE):
         ndim = 7
-    elif joint_type == mujoco.mjtJoint.mjJNT_BALL:
+    elif joint_type == int(mujoco.mjtJoint.mjJNT_BALL):
         ndim = 4
     else:
-        assert joint_type in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE)
+        assert joint_type in (int(mujoco.mjtJoint.mjJNT_HINGE), int(mujoco.mjtJoint.mjJNT_SLIDE))
         ndim = 1
 
     start_idx = joint_addr
@@ -83,15 +83,15 @@ def set_joint_qvel(model, data, name, value):
     """Set the joints linear and angular (qvel) of the model. Used to lock the ghost cube in rendering"""
     joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
     assert joint_id != -1, f"Joint with name '{name}' is not part of the model!"
-    joint_type = model.jnt_type[joint_id]
+    joint_type = int(model.jnt_type[joint_id])
     joint_addr = model.jnt_dofadr[joint_id]
 
-    if joint_type == mujoco.mjtJoint.mjJNT_FREE:
+    if joint_type == int(mujoco.mjtJoint.mjJNT_FREE):
         ndim = 6
-    elif joint_type == mujoco.mjtJoint.mjJNT_BALL:
+    elif joint_type == int(mujoco.mjtJoint.mjJNT_BALL):
         ndim = 3
     else:
-        assert joint_type in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE)
+        assert joint_type in (int(mujoco.mjtJoint.mjJNT_HINGE), int(mujoco.mjtJoint.mjJNT_SLIDE))
         ndim = 1
 
     start_idx = joint_addr
@@ -108,16 +108,16 @@ def get_joint_qpos(model, data, name):
     """Return position and orientation (qpos) of one joint"""
     joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
     assert joint_id != -1, f"Joint with name '{name}' is not part of the model!"
-    joint_type = model.jnt_type[joint_id]
+    joint_type = int(model.jnt_type[joint_id])
     joint_addr = model.jnt_qposadr[joint_id]
 
-    if joint_type == mujoco.mjtJoint.mjJNT_FREE:
+    if joint_type == int(mujoco.mjtJoint.mjJNT_FREE):
         # (x,y,z, qw, qx, qy, qz) q- means quaternion term. 3 position terms then 4 orientation terms.
         ndim = 7
-    elif joint_type == mujoco.mjtJoint.mjJNT_BALL:
+    elif joint_type == int(mujoco.mjtJoint.mjJNT_BALL):
         ndim = 4
     else:
-        assert joint_type in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE)
+        assert joint_type in (int(mujoco.mjtJoint.mjJNT_HINGE), int(mujoco.mjtJoint.mjJNT_SLIDE))
         ndim = 1
 
     start_idx = joint_addr
@@ -130,16 +130,16 @@ def get_joint_qvel(model, data, name):
     """Return linear and angular velocities (qvel) of one joint"""
     joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
     assert joint_id != -1, f"Joint with name '{name}' is not part of the model!"
-    joint_type = model.jnt_type[joint_id]
+    joint_type = int(model.jnt_type[joint_id])
     joint_addr = model.jnt_dofadr[joint_id]
 
-    if joint_type == mujoco.mjtJoint.mjJNT_FREE:
+    if joint_type == int(mujoco.mjtJoint.mjJNT_FREE):
         # (x,y,z, ax, ay, az) 3 linear velocity terms then 3 angular velocity terms
         ndim = 6
-    elif joint_type == mujoco.mjtJoint.mjJNT_BALL:
+    elif joint_type == int(mujoco.mjtJoint.mjJNT_BALL):
         ndim = 4
     else:
-        assert joint_type in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE)
+        assert joint_type in (int(mujoco.mjtJoint.mjJNT_HINGE), int(mujoco.mjtJoint.mjJNT_SLIDE))
         ndim = 1
 
     start_idx = joint_addr
