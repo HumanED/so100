@@ -134,7 +134,10 @@ for ex in EXPERIMENTS:
         # the GPU stays visible: EGL offscreen rendering (the video) runs on it
         r = subprocess.run([sys.executable, "-m", "so_arm_warp.eval_sb3", ck] + extra, cwd=SRC, capture_output=True, text=True)
         out = [l for l in r.stdout.splitlines() if "SoFetchEnv" in l or "Wrote" in l or "rendering" in l]
-        print("\n".join(out) if out else "", "" if r.returncode == 0 else f"(exit code {r.returncode})\n" + r.stderr[-1500:])
+        for line in out:
+            print(line)
+        if r.returncode:
+            print(f"(exit code {r.returncode})", r.stderr[-1500:])
 """),
     md("## Package outputs"),
     code("""
