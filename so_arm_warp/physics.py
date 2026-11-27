@@ -72,6 +72,10 @@ def build(pc: PhysicsConfig):
 class WarpBatch:
     """nworld copies of the scene on one GPU. step_env() advances every world by one env step (n_substeps)."""
 
+    # MuJoCo's simulation state (everything else in Data is derived from it by the next step)
+    _STATE = ("time", "qpos", "qvel", "act", "qacc_warmstart", "ctrl", "qfrc_applied", "xfrc_applied",
+              "mocap_pos", "mocap_quat")
+
     def __init__(self, pc: PhysicsConfig, nworld: int, device: Optional[str] = None, quiet: bool = True):
         import warp as wp
         import mujoco_warp as mjw
@@ -96,12 +100,17 @@ class WarpBatch:
         with wp.ScopedDevice(self.device):
             if self.device.is_cuda:
                 if self._graph is None:
+                    # Compiling runs the physics once, which would make the first env step two steps. Save the
+                    # simulation state and put it back afterwards (derived quantities are recomputed by the next step).
+                    saved = {k: wp.clone(getattr(self.dw, k)) for k in self._STATE if getattr(self.dw, k, None) is not None}
                     for _ in range(self.cfg.n_substeps):   # compile kernels before capturing
                         self.mjw.step(self.mw, self.dw)
                     with wp.ScopedCapture() as cap:
                         for _ in range(self.cfg.n_substeps):
                             self.mjw.step(self.mw, self.dw)
                     self._graph = cap.graph
+                    for k, v in saved.items():
+                        wp.copy(getattr(self.dw, k), v)
                 wp.capture_launch(self._graph)
             else:
                 for _ in range(self.cfg.n_substeps):
