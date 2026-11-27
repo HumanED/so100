@@ -14,6 +14,10 @@ Differences from SoFetchVecEnv, all for speed:
 - Per-env info dicts are empty except for envs whose episode just ended. The full SoFetchEnv info dict (the rew_*
   keys TensorboardCallback reads) is kept for env 0 only, which is all TensorboardCallback looks at.
 - Needs a CUDA GPU (Kaggle T4 is fine).
+
+One experiment on several GPUs: devices=["cuda:0", "cuda:1"] splits num_envs evenly across them. Each step launches
+the physics on every GPU before waiting on any, so they run at the same time; the results are joined into one batch
+in the same order (envs 0..n/2-1 on cuda:0, the rest on cuda:1). SB3's PPO update still runs on one GPU (the first).
 """
 from typing import Any, List, Optional, Sequence
 
@@ -38,14 +42,21 @@ def _reset_info() -> dict:
 
 class SoFetchWarpVecEnv(VecEnv):
     def __init__(self, num_envs: int = 4096, physics: str = "original_20it", reward: str = "default",
-                 device: Optional[str] = None, seed: int = 0):
+                 device: Optional[str] = None, seed: int = 0, devices: Optional[Sequence[str]] = None):
         self.MAX_TIMESTEPS, self.N_DISCRETE, self.render_mode = MAX_TIMESTEPS, N_DISCRETE, None
-        self.env = FetchWarpEnv(num_envs, PhysicsConfig(case=physics), reward=reward,
-                                episode_length=MAX_TIMESTEPS, device=device, seed=seed)
+        devices = list(devices) if devices else [device]
+        if num_envs % len(devices):
+            raise ValueError(f"num_envs={num_envs} must split evenly across {len(devices)} devices")
+        per = num_envs // len(devices)
+        self.envs = [FetchWarpEnv(per, PhysicsConfig(case=physics), reward=reward, episode_length=MAX_TIMESTEPS,
+                                  device=d, seed=seed + k) for k, d in enumerate(devices)]
+        self.env = self.envs[0]                     # holds env 0 (TensorboardCallback's info dict)
+        self._slices = [slice(k * per, (k + 1) * per) for k in range(len(devices))]
         nu = self.env.action_size
         obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.env.obs_size,), dtype=np.float32)
         super().__init__(num_envs, obs_space, spaces.MultiDiscrete([N_DISCRETE] * nu))
-        self.device = self.env.device
+        self.device = self.env.device               # where the PPO policy goes
+        self.devices = [e.device for e in self.envs]
         self._actions: Optional[np.ndarray] = None
         self._info0 = _reset_info()
 
@@ -54,29 +65,34 @@ class SoFetchWarpVecEnv(VecEnv):
         self._info0 = _reset_info()
         self._reset_seeds()
         self._reset_options()
-        return self.env.reset().cpu().numpy()
+        return np.concatenate([e.reset().cpu().numpy() for e in self.envs])
 
     def step_async(self, actions: np.ndarray) -> None:
         self._actions = np.asarray(actions).reshape(self.num_envs, -1)
 
     def step_wait(self) -> VecEnvStepReturn:
-        a = torch.as_tensor(self._actions, device=self.device, dtype=torch.float32)
-        obs, reward, done, info = self.env.step(-1 + a * 2 / (N_DISCRETE - 1))
-        obs_np, rew_np, done_np = obs.cpu().numpy(), reward.cpu().numpy(), done.cpu().numpy()
-        self._update_info0(done_np[0])
-
+        a = -1 + torch.as_tensor(self._actions, dtype=torch.float32) * 2 / (N_DISCRETE - 1)
+        for e, sl in zip(self.envs, self._slices):          # start every GPU's physics before waiting on any
+            e.step_launch(a[sl].to(e.device, non_blocking=True))
         infos: List[dict] = [{} for _ in range(self.num_envs)]
-        if done_np.any():
-            idx = np.flatnonzero(done_np)
-            term = info["terminal_obs"].cpu().numpy()
-            trunc = info["timeout"][done].cpu().numpy()
-            zero = torch.zeros(len(idx), device=self.device)
-            succ = (info["episode"].get("success", zero) > 0).cpu().numpy()
-            grasp = (info["episode"].get("grasp", zero) > 0).cpu().numpy()
-            for j, i in enumerate(idx):
-                infos[i] = {"terminal_observation": term[j], "TimeLimit.truncated": bool(trunc[j]),
-                            "is_success": int(succ[j]), "grasped": int(grasp[j])}
-        return obs_np, rew_np, done_np, infos
+        obs_l, rew_l, done_l = [], [], []
+        for e, sl in zip(self.envs, self._slices):
+            obs, reward, done, info = e.step_finish()
+            done_np = done.cpu().numpy()
+            obs_l.append(obs.cpu().numpy()); rew_l.append(reward.cpu().numpy()); done_l.append(done_np)
+            if done_np.any():
+                idx = np.flatnonzero(done_np) + sl.start
+                term = info["terminal_obs"].cpu().numpy()
+                trunc = info["timeout"][done].cpu().numpy()
+                zero = torch.zeros(len(idx), device=e.device)
+                succ = (info["episode"].get("success", zero) > 0).cpu().numpy()
+                grasp = (info["episode"].get("grasp", zero) > 0).cpu().numpy()
+                for j, i in enumerate(idx):
+                    infos[i] = {"terminal_observation": term[j], "TimeLimit.truncated": bool(trunc[j]),
+                                "is_success": int(succ[j]), "grasped": int(grasp[j])}
+        done_np = np.concatenate(done_l)
+        self._update_info0(done_np[0])
+        return np.concatenate(obs_l), np.concatenate(rew_l), done_np, infos
 
     def _update_info0(self, done0: bool) -> None:
         """SoFetchEnv's info dict for env 0 (what TensorboardCallback reads via get_attr("info")[0])."""

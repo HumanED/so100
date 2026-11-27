@@ -5,6 +5,8 @@ Speed (and a learning check) of Stable-Baselines3 PPO on MuJoCo Warp through SoF
     python -m so_arm_warp.sb3_bench --mode env                                 # adapter only, random actions
     python -m so_arm_warp.sb3_bench --mode learn --minutes 40 --csv learn.csv  # one longer run, grasp / success rate
     python -m so_arm_warp.sb3_bench --mode eval --model learn_model.zip --physics original full   # play back a model
+    python -m so_arm_warp.sb3_bench --mode multigpu --json multi.json          # one experiment on 1 vs 2 GPUs
+    python -m so_arm_warp.sb3_bench --mode learn --gpus 2 --num-envs 16384 --batch-size 16384     # learning, 2 GPUs
 
 Every run uses train_parallel.py's setup: VecMonitor + VecNormalize(norm_obs, norm_reward, clip_obs=10), MlpPolicy,
 SB3's default PPO hyperparameters except n_steps / batch_size / n_epochs, and train_parallel's TensorboardCallback.
@@ -31,6 +33,19 @@ SPEED_CONFIGS = [
     ("8192 envs, batch 16384, 5 epochs", 8192, 16, 16384, 5, "full"),
     ("8192 envs, batch 8192, original physics", 8192, 16, 8192, 10, "original"),
 ]
+
+# one experiment split over GPUs: (label, gpus, total num_envs, n_steps, batch_size, n_epochs), original_20it physics
+MULTI_GPU_CONFIGS = [
+    ("1 GPU, 8192 envs, batch 8192 (the default)", 1, 8192, 16, 8192, 10),
+    ("2 GPUs, 8192 envs (4096 each), batch 8192", 2, 8192, 16, 8192, 10),
+    ("2 GPUs, 16384 envs (8192 each), batch 16384", 2, 16384, 16, 16384, 10),
+    ("2 GPUs, 16384 envs (8192 each), batch 8192", 2, 16384, 16, 8192, 10),
+    ("2 GPUs, 16384 envs (8192 each), batch 16384, 5 epochs", 2, 16384, 16, 16384, 5),
+]
+
+
+def gpu_list(gpus):
+    return [f"cuda:{i}" for i in range(gpus)] if gpus > 1 else None
 
 
 class Timing(BaseCallback):
@@ -70,8 +85,8 @@ class Timing(BaseCallback):
         return True
 
 
-def make(num_envs, physics, device):
-    return VecNormalize(VecMonitor(SoFetchWarpVecEnv(num_envs, physics=physics, device=device)),
+def make(num_envs, physics, device, gpus=1):
+    return VecNormalize(VecMonitor(SoFetchWarpVecEnv(num_envs, physics=physics, device=device, devices=gpu_list(gpus))),
                         norm_obs=True, norm_reward=True, clip_obs=10.0)
 
 
@@ -81,8 +96,8 @@ def tb_callback():
     return TensorboardCallback()
 
 
-def run_speed(label, num_envs, n_steps, batch, epochs, physics, device, updates, max_s):
-    venv = make(num_envs, physics, device)
+def run_speed(label, num_envs, n_steps, batch, epochs, physics, device, updates, max_s, gpus=1):
+    venv = make(num_envs, physics, device, gpus)
     model = PPO("MlpPolicy", venv, n_steps=n_steps, batch_size=batch, n_epochs=epochs, device=device, verbose=0)
     per_update = num_envs * n_steps
     model.learn(per_update, callback=tb_callback())   # warm-up: Warp compile + CUDA graph capture
@@ -94,7 +109,7 @@ def run_speed(label, num_envs, n_steps, batch, epochs, physics, device, updates,
         done += 1
     wall = time.time() - t
     steps = done * per_update
-    r = dict(config=label, num_envs=num_envs, n_steps=n_steps, batch_size=batch, n_epochs=epochs, physics=physics,
+    r = dict(config=label, gpus=gpus, num_envs=num_envs, n_steps=n_steps, batch_size=batch, n_epochs=epochs, physics=physics,
              updates=done, steps_per_s=round(steps / wall), rollout_steps_per_s=round(steps / tm.rollout_s),
              rollout_frac=round(tm.rollout_s / wall, 2), s_per_update=round(wall / done, 1))
     print(f"{label:45s} {r['steps_per_s']:>8,} steps/s  (collect {r['rollout_steps_per_s']:>8,}/s, "
@@ -106,8 +121,8 @@ def run_speed(label, num_envs, n_steps, batch, epochs, physics, device, updates,
     return r
 
 
-def run_env(num_envs, physics, device, steps=200):
-    venv = SoFetchWarpVecEnv(num_envs, physics=physics, device=device)
+def run_env(num_envs, physics, device, steps=200, gpus=1):
+    venv = SoFetchWarpVecEnv(num_envs, physics=physics, device=device, devices=gpu_list(gpus))
     venv.reset()
     rng = np.random.default_rng(0)
     acts = rng.integers(0, 64, (8, num_envs, venv.action_space.shape[0]))
@@ -117,8 +132,8 @@ def run_env(num_envs, physics, device, steps=200):
     for k in range(steps):
         venv.step(acts[k % 8])
     sps = num_envs * steps / (time.time() - t)
-    print(f"adapter only, {physics:8s} {num_envs:6d} envs: {sps:>10,.0f} env steps/s", flush=True)
-    return dict(config=f"adapter only ({physics})", num_envs=num_envs, steps_per_s=round(sps))
+    print(f"adapter only, {physics:8s} {num_envs:6d} envs on {gpus} GPU(s): {sps:>10,.0f} env steps/s", flush=True)
+    return dict(config=f"adapter only ({physics})", gpus=gpus, num_envs=num_envs, steps_per_s=round(sps))
 
 
 def run_eval(model_path, vecnorm_path, physics, device, num_envs=1024):
@@ -149,7 +164,7 @@ MAX_EP = 100
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["speed", "env", "learn", "eval"], default="speed")
+    p.add_argument("--mode", choices=["speed", "env", "learn", "eval", "multigpu"], default="speed")
     p.add_argument("--physics", nargs="+", default=["original_20it"], help="learn: first entry; env / eval: each one")
     p.add_argument("--model", default=None, help="eval: SB3 .zip (VecNormalize stats: <model minus _model>_vecnorm.pkl)")
     p.add_argument("--device", default="cuda:0")
@@ -158,6 +173,7 @@ def main():
     p.add_argument("--minutes", type=float, default=40)
     p.add_argument("--num-envs", type=int, default=8192)
     p.add_argument("--batch-size", type=int, default=8192)
+    p.add_argument("--gpus", type=int, default=1, help="learn: split the envs over this many GPUs")
     p.add_argument("--json", default=None)
     p.add_argument("--csv", default="sb3_learn.csv")
     a = p.parse_args()
@@ -178,12 +194,24 @@ def main():
                 results.append(dict(config=cfg[0], failed=f"{type(e).__name__}: {e}"))
             if a.json:
                 json.dump(results, open(a.json, "w"), indent=1)
+    elif a.mode == "multigpu":
+        physics = a.physics[0]
+        for gpus, n in ((1, 8192), (2, 8192), (2, 16384)):
+            results.append(run_env(n, physics, a.device, gpus=gpus))
+        for label, gpus, n, n_steps, batch, epochs in MULTI_GPU_CONFIGS:
+            try:
+                results.append(run_speed(label, n, n_steps, batch, epochs, physics, a.device, a.updates, a.max_s, gpus))
+            except Exception as e:
+                print(f"{label}: FAILED {type(e).__name__}: {e}", flush=True)
+                results.append(dict(config=label, failed=f"{type(e).__name__}: {e}"))
+            if a.json:
+                json.dump(results, open(a.json, "w"), indent=1)
     elif a.mode == "eval":
         vn = a.model.replace("_model.zip", "_vecnorm.pkl")
         for physics in a.physics:
             results += run_eval(a.model, vn, physics, a.device, num_envs=min(a.num_envs, 1024))
     else:
-        venv = make(a.num_envs, a.physics[0], a.device)
+        venv = make(a.num_envs, a.physics[0], a.device, a.gpus)
         model = PPO("MlpPolicy", venv, n_steps=16, batch_size=a.batch_size, n_epochs=10, device=a.device, verbose=0)
         tm = Timing(csv=a.csv)
         t = time.time()

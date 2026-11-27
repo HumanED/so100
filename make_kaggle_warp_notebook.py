@@ -29,8 +29,12 @@ cells = [
 
 Physics runs in MuJoCo Warp on the GPU (8,192 envs at once) behind a normal SB3 VecEnv (`so_arm_warp/sb3_vec_env.py`),
 with the same PPO setup as `train_parallel.py` (VecMonitor + VecNormalize, MlpPolicy). A Kaggle GPU session has
-**two T4s** and each run uses one, so this notebook trains up to **two experiments side by side** (e.g. two reward
-functions). Code is cloned from the `{a.branch}` branch.
+**two T4s**, used one of two ways (`MODE` below):
+- **`"variety"`** (default): **two experiments side by side**, one per T4 (e.g. two reward functions), ~16.6k steps/s each.
+- **`"focus"`**: **one experiment on both T4s** (the first in `EXPERIMENTS`), ~24k steps/s, ~1.45× faster. Same PPO
+  settings, so results are comparable. Use it once something looks promising and you want that one run sooner.
+
+Code is cloned from the `{a.branch}` branch.
 
 **Kaggle settings:** Accelerator **GPU T4 x2**, Internet **On**, then **Save Version → Save & Run All** (12 h limit).
 Download `results.zip` from the version's Output tab.
@@ -48,9 +52,10 @@ the CPU env). Don't use `full`: it's faster but its policies fail in the CPU env
 """),
     code(f"""
 BRANCH = "{a.branch}"
+MODE = "variety"                  # "variety": one experiment per T4 | "focus": the first experiment, split over both T4s
 HOURS = 11.0                      # stop each run after this long (Kaggle ends sessions at 12 h)
-NUM_ENVS = 8192                   # parallel envs per GPU
-EXPERIMENTS = [                   # one per GPU; remove one to train a single run
+NUM_ENVS = 8192                   # parallel envs per experiment (in "focus" they're split across the T4s)
+EXPERIMENTS = [                   # "variety": one per GPU; "focus": only the first one is trained
     dict(run_name="carl-default-1", reward="default", case="original_20it"),
     dict(run_name="carl-fast-1", reward="default", case="full_elliptic"),
 ]
@@ -70,24 +75,27 @@ print("GPUs:", [torch.cuda.get_device_name(i) for i in range(n_gpu)])
 assert n_gpu >= 1, "No GPU: set the accelerator to GPU T4 x2"
 os.makedirs(OUT, exist_ok=True)
 """),
-    md("## Train (one process per GPU)"),
+    md("## Train (variety: one process per GPU; focus: one process on all GPUs)"),
     code("""
+assert MODE in ("variety", "focus"), MODE
+focus = MODE == "focus" and n_gpu > 1
+runs = EXPERIMENTS[:1] if MODE == "focus" else EXPERIMENTS[:n_gpu]
 procs = []
-for i, ex in enumerate(EXPERIMENTS[:n_gpu]):
+for i, ex in enumerate(runs):
     cmd = [sys.executable, "-m", "so_arm_warp.train_sb3", "--run-name", ex["run_name"], "--reward", ex["reward"],
            "--physics", ex.get("case", "original_20it"), "--num-envs", str(NUM_ENVS), "--hours", str(HOURS),
-           "--out-dir", OUT]
+           "--out-dir", OUT] + (["--gpus", str(n_gpu)] if focus else [])
     ck = RESUME.get(ex["run_name"])
     if ck and os.path.exists(ck):
         cmd += ["--resume", ck]
     elif ck:
         print("no checkpoint at", ck, "- starting", ex["run_name"], "from scratch")
     log = open(os.path.join(OUT, f"{ex['run_name']}.stdout"), "w")
-    env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(i)}
+    env = dict(os.environ) if focus else {**os.environ, "CUDA_VISIBLE_DEVICES": str(i)}
     procs.append((ex["run_name"], subprocess.Popen(cmd, cwd=SRC, stdout=log, stderr=subprocess.STDOUT, env=env), log))
-    print("started", ex["run_name"], "on GPU", i)
-if len(EXPERIMENTS) > n_gpu:
-    print("Only", n_gpu, "GPU(s): skipped", [e["run_name"] for e in EXPERIMENTS[n_gpu:]])
+    print("started", ex["run_name"], f"on all {n_gpu} GPUs (focus)" if focus else f"on GPU {i}")
+if len(EXPERIMENTS) > len(runs):
+    print(f"{MODE}: not training", [e["run_name"] for e in EXPERIMENTS[len(runs):]])
 
 def last_line(name):
     try:

@@ -3,7 +3,10 @@
 Kaggle gives every account free GPU time (two NVIDIA T4s per session, roughly 30 hours a week; check
 *Settings → Quotas*). We use it to run our recommended setup, **Stable-Baselines3 PPO on MuJoCo Warp** with `original_20it` physics
 (16,600 training steps/s per T4, and its policies work in the real CPU env; see [TRAINING_OPTIONS.md](TRAINING_OPTIONS.md)).
-One notebook session trains **up to two experiments at once**, one per GPU, for up to 12 hours.
+A notebook session has two T4s and runs for up to 12 hours. You choose how to use them:
+- **Variety** (default): **two experiments at once**, one per T4, at ~16,600 steps/s each. Best for comparing ideas.
+- **Focus:** **one experiment on both T4s**, at ~24,000 steps/s (1.45×), with the same PPO settings. Best when one idea
+  looks promising and you want its result sooner. In our test it reached a reliable grasp in 17 minutes instead of 22.
 
 There are two ways to start a job:
 
@@ -30,14 +33,17 @@ function) has to be **pushed to a branch** first.
 4. Edit the **settings cell** (the second cell):
    ```python
    BRANCH = "main"                   # the GitHub branch to run (yours, if you changed the reward)
+   MODE = "variety"                  # "variety": one experiment per T4 | "focus": the first experiment on both T4s
    HOURS = 11.0                      # each run stops after this long (sessions end at 12 h)
-   NUM_ENVS = 8192                   # parallel envs per GPU
-   EXPERIMENTS = [                   # one per GPU
+   NUM_ENVS = 8192                   # parallel envs per experiment (split across the T4s in "focus")
+   EXPERIMENTS = [                   # "variety": one per T4; "focus": only the first is trained
        dict(run_name="carl-default-1", reward="default", case="original_20it"),
        dict(run_name="carl-fast-1", reward="default", case="full_elliptic"),
    ]
    RESUME = {}
    ```
+   - **`MODE`:** `"variety"` trains both experiments, one per T4. `"focus"` trains only the first one, with its envs
+     split over both T4s (~1.45× faster).
    - **`reward`:** a name from `so_arm_warp/rewards.py`: `default` (exactly `SoFetchEnv`'s reward), `legacy` (the
      pre-PPO7 reward), or your own.
    - **`case`:** the physics option.
@@ -84,6 +90,9 @@ Use one of these. **Never commit credentials.**
 # Start a job: two experiments, one per T4 (physics original_20it unless given)
 python tools/kaggle_job.py submit --name so100-carl-rewards \
     --exp carl-default-1:default --exp carl-fast-1:default:full_elliptic
+
+# Focus: one experiment on both T4s (~1.45x faster), e.g. once carl-default-1 looks promising
+python tools/kaggle_job.py submit --name so100-carl-focus --focus --exp carl-default-2:default
 
 # Other options
 #   --exp RUN:REWARD:CASE     choose physics per run, e.g. carl-fast-1:default:full_elliptic

@@ -70,7 +70,47 @@ def test_sb3_ppo_trains():
     assert model.num_timesteps >= 400 and len(model.ep_info_buffer) == N
 
 
+def test_split_across_devices_matches_halves(steps=110):
+    """devices=[a, b] (one experiment's envs split over two GPUs) is exactly two half-size envs joined in order:
+    obs, rewards, dones, per-env infos (env indices offset for the second half) and env 0's info dict.
+    (Not bit-identical to one N-world batch: Warp's float32 results depend slightly on the batch size.)
+    Splits over cuda:0 / cuda:1 when there are two GPUs, else two copies on one device.
+    On a GPU, Warp isn't bit-for-bit repeatable: running the same unsplit envs twice drifts by ~1e-6 over the first
+    steps and then grows (contacts are chaotic), exactly as much as split vs halves did on Kaggle's 2 x T4. So values are
+    compared tightly only for the first steps there (enough to catch misordered envs, whose actions differ) and
+    structure (episode ends, info keys, terminal observations) for every step. On CPU everything is compared exactly."""
+    import warp as wp
+    d = _device()
+    pair = ["cuda:0", "cuda:1"] if wp.get_cuda_device_count() >= 2 else [d, d]
+    halves = [SoFetchWarpVecEnv(N // 2, device=pair[k], seed=k) for k in range(2)]
+    two = SoFetchWarpVecEnv(N, devices=pair)
+    gpu = d.startswith("cuda")
+    np.testing.assert_array_equal(np.concatenate([h.reset() for h in halves]), two.reset())
+    rng = np.random.default_rng(1)
+    ended = 0
+    for t in range(steps):   # crosses the 100-step episode boundary (auto-reset, terminal_observation)
+        a = rng.integers(0, 64, (N, two.action_space.shape[0]))
+        ref = [h.step(a[k * N // 2:(k + 1) * N // 2]) for k, h in enumerate(halves)]
+        o, r, dn, info = two.step(a)
+        values = not gpu or t < 5
+        if values:
+            atol = 1e-4 if gpu else 1e-6
+            np.testing.assert_allclose(o, np.concatenate([x[0] for x in ref]), atol=atol, err_msg=f"step {t}")
+            np.testing.assert_allclose(r, np.concatenate([x[1] for x in ref]), atol=atol, err_msg=f"step {t}")
+        assert (dn == np.concatenate([x[2] for x in ref])).all()
+        for x, y in zip(info, ref[0][3] + ref[1][3]):
+            assert x.keys() == y.keys()
+            if "terminal_observation" in x:
+                ended += 1
+                if values:
+                    np.testing.assert_allclose(x["terminal_observation"], y["terminal_observation"], atol=1e-6)
+        if values:
+            assert two.get_attr("info")[0] == pytest.approx(halves[0].get_attr("info")[0], abs=1e-5)
+    assert ended == N    # every env finished one episode, in both halves
+
+
 if __name__ == "__main__":
     test_matches_cpu_vec_env()
     test_sb3_ppo_trains()
+    test_split_across_devices_matches_halves()
     print("OK")
