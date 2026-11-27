@@ -95,7 +95,8 @@ def test_split_across_devices_matches_halves(steps=110):
             if "terminal_observation" in x:
                 ended += 1
                 np.testing.assert_allclose(x["terminal_observation"], y["terminal_observation"], atol=1e-6)
-        assert two.get_attr("info")[0] == halves[0].get_attr("info")[0]
+        # float reward terms: GPU float maths isn't bit-for-bit repeatable between runs, so compare with a tolerance
+        assert two.get_attr("info")[0] == pytest.approx(halves[0].get_attr("info")[0], abs=1e-5)
     assert ended == N    # every env finished one episode, in both halves
 
 

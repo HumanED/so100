@@ -10,6 +10,7 @@ For imitation learning on the SO-101 with LeRobot, see [imitation_learning/](imi
 | | Setup | Speed (training steps/s) | Policy works in the real env? | Docs |
 |---|---|---|---|---|
 | **Recommended** | **SB3 PPO on MuJoCo Warp, `original_20it` physics**, Kaggle's free T4 GPUs (`so_arm_warp.train_sb3`) | **16,600 per T4 (6.9× the original setup)**, two experiments per notebook | ✅ 20/20 grasps in `SoFetchEnv` | [docs/KAGGLE.md](docs/KAGGLE.md) |
+| One idea, sooner | Same, but **one experiment split over both T4s** (`MODE = "focus"` / `--focus` / `--gpus 2`) | 24,000 for that one run (10×); reached the grasp ~22% sooner | ✅ 20/20 grasps | [docs/KAGGLE.md](docs/KAGGLE.md) |
 | Quick sweeps | Same, `full_elliptic` physics | 23,000 per T4 (9.6×) | ✅ 20/20 (check winners) | [docs/KAGGLE.md](docs/KAGGLE.md) |
 | No GPU quota | SB3 on a laptop (`train_parallel.py`, `SoFetchVecEnv`) | 7,100 (3.0×) | ✅ exact physics | below |
 | Original setup | SB3 + `SubprocVecEnv` | 2,400 (1.0×) | ✅ | below |
@@ -35,6 +36,10 @@ about the reward rather than speed. Every measurement, including what failed (MJ
   Checkpoints use `train_parallel.py`'s layout: `warp_sb3_out/models/<run>/<steps>.zip` plus
   `warp_sb3_out/vec_norm_stats/<run>/<steps>.pkl`, with `log.csv` and tensorboard under `warp_sb3_out/logs/`.
   `--resume <...>/final.zip` continues a run.
+- **Variety or focus (Kaggle gives two T4s):** by default each T4 trains its own experiment, so you can compare two ideas.
+  Once one looks promising, `--gpus 2` (Kaggle: `MODE = "focus"`, or `kaggle_job.py submit --focus`) splits that one
+  experiment's envs over both T4s: 24k instead of 16.6k steps/s with the same PPO settings, and in our test it reached a
+  reliable grasp in 17 instead of 22 minutes. See [docs/TRAINING_OPTIONS.md](docs/TRAINING_OPTIONS.md#variety-or-focus-using-both-t4s).
 - **From `train_parallel.py`:** set `vec_env_backend = "warp"`. It uses the same PPO, callbacks and saving as before,
   with `SoFetchWarpVecEnv` (`so_arm_warp/sb3_vec_env.py`) in place of the CPU envs.
 - **Reward experiments:** add a class to [`so_arm_warp/rewards.py`](so_arm_warp/rewards.py) and pass `--reward <name>`.

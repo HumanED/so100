@@ -26,6 +26,7 @@ with the jaws at least 4 cm open.
 | 1 | SB3 + Warp `full`, batch 16k, 5 epochs | T4 | 60,500 | 25× | 0.46 | Pyramidal friction, 4 ms steps | ❌ (same physics as #3) | Fast but its policies don't transfer |
 | 2 | Our PyTorch PPO + Warp `full` | T4 | ~60,000 | 25× | 0.46 | Pyramidal friction, 4 ms steps | ❌ never learned (0.02% on Warp) | Dropped |
 | 3 | SB3 + Warp `full`, batch 8k | T4 | 39,000 | 16× | 0.71 | Pyramidal friction, 4 ms steps | ❌ 0/20 / 6/20 | Dropped |
+| 3b | **SB3 + Warp `original_20it`, one experiment on both T4s ("focus")** | **2 × T4** | **24,000** | **10×** | **1.2** | Same as #5 | ✅ **20/20 / 20/20** | **When one idea deserves both GPUs** |
 | 4 | SB3 + Warp `full_elliptic` | T4 | 23,000 | 9.6× | 1.2 | Real friction model, 4 ms steps | ✅ 20/20 / 20/20 | For quick reward sweeps |
 | 5 | **SB3 + Warp `original_20it`** | **T4** | **16,600** | **6.9×** | **1.7** | **Exact model and solver, 20 iterations instead of 100** | ✅ **20/20 / 20/20** | **Recommended default** |
 | 6 | SB3 + Warp `original` | T4 | 9,100 | 3.8× | 3.1 | Exact (float32 on GPU) | Not trained (should transfer) | Too slow for what it adds |
@@ -47,6 +48,7 @@ with the jaws at least 4 cm open.
 | SB3 + Warp `full` | ~17 min | ~29M | 99.8% (40 min) | 0% | +1.8 |
 | SB3 + Warp `full_elliptic` | ~19 min | ~27M | 100% (50 min) | 0% | +0.7 to +1.0 |
 | **SB3 + Warp `original_20it`** | **~25 min** | **~25M** | **100% (50 min)** | 0% | +1.0 to +1.6 |
+| **Same, one experiment on both T4s (focus)** | **~22% sooner** (17.1 vs 21.9 min to a 90% grasp rate) | ~24M | 100% (40 min) | 0% | +5.4 (40 min) |
 | Our PyTorch PPO + Warp `full` | Never, in 40 min | 147M seen | 0.02% | 0% | −20.7 |
 | SB3 + `SoFetchVecEnv` (M3) | ~1 h *(estimate)* | ~25M | Not run | — | — |
 | SB3 + `SubprocVecEnv` (M3) | ~3 h *(estimate)* | ~25M | Not run | — | — |
@@ -67,6 +69,36 @@ drops to 0% deterministic on `full_elliptic` (`full` with `original`'s elliptic 
 So the gap comes from `full`'s **pyramidal friction cone**, not the timestep or the collision hulls. The policy
 learned to rely on how the pyramidal cone grips the cube. The SB3 adapter itself is consistent: Warp `original` and
 the CPU env agree.
+
+## Variety or focus: using both T4s
+
+A Kaggle session has two T4s. **Variety** (the default) trains a different experiment on each. **Focus** splits one
+experiment's envs over both (`train_sb3 --gpus 2`, notebook `MODE = "focus"`, `kaggle_job.py submit --focus`): each
+step runs the physics on both GPUs at once and joins the results into one batch, and SB3's PPO update runs on the first
+GPU. Measured on Kaggle's 2 × T4, `original_20it` physics:
+
+| Setup | Envs | Batch | Training steps/s | vs one T4 | Env only (no PPO) |
+|---|---|---|---|---|---|
+| One T4 (variety, per experiment) | 8,192 | 8,192 | 17,760 | 1.0× | 24,041 |
+| **Both T4s, same settings (focus default)** | **8,192 (4,096 each)** | **8,192** | **25,582** | **1.44×** | **41,336** |
+| Both T4s, twice the envs | 16,384 (8,192 each) | 16,384 | 31,648 | 1.78× | 47,555 |
+| Both T4s, twice the envs, smaller batch | 16,384 | 8,192 | 27,388 | 1.54× | |
+| Both T4s, twice the envs, 5 epochs | 16,384 | 16,384 | 36,382 | 2.05× | Not tested for learning |
+
+The PPO update isn't split, so the gain is less than 2×. **Learning (40-minute runs, `default` reward):**
+
+| Run | Training steps/s | Grasp ≥ 50% | Grasp ≥ 90% | Return at 40 min | CPU `SoFetchEnv` grasps (det. / sampled) |
+|---|---|---|---|---|---|
+| One T4 (earlier run) | 16,600 | 20.0 min (19.5M steps) | 21.9 min (21.2M) | +1.4 | 20/20 / 20/20 |
+| **Both T4s, same settings** | **24,000** | **16.4 min (23.3M)** | **17.1 min (24.4M)** | **+5.4** | **20/20 / 20/20** |
+| Both T4s, twice the envs | 28,200 | 21.7 min (37.0M) | 26.0 min (44.0M) | +4.1 | 20/20 / 20/20 |
+
+- **Same settings is the focus default.** It's the same PPO run, just 1.45× faster, so it reached the grasp ~22% sooner.
+- **Twice the envs is faster per step but slower to learn.** Bigger batches mean fewer policy updates per step
+  collected, so it needed ~44M steps instead of ~24M and reached the grasp later.
+- **Variety still gets more total training:** 2 × 16.6k = 33k steps/s across two experiments, against 24k for one.
+  Use focus when one result matters more than comparing two.
+- One run each, so expect some variation. The one-T4 run shared the machine with a second run on the other T4.
 
 ## Physics speed only (no learning)
 
@@ -119,6 +151,7 @@ Masses, joints, motors and the reward are identical in every option.
 |---|---|---|
 | `original_20it` | ~720M | 2 |
 | `full_elliptic` | ~1.0B | 2 |
+| `original_20it`, focus (both T4s on one experiment) | ~1.0B for that one | 1 |
 | CPU `SoFetchVecEnv` on a laptop, 12 h overnight | ~300M | 1 |
 
 ## Caveats
@@ -134,7 +167,8 @@ Masses, joints, motors and the reward are identical in every option.
 ## Recommendation
 
 1. **Main workflow: SB3 + Warp `original_20it` on Kaggle T4 ×2.** Each person runs two reward experiments per
-   notebook on their own free weekly GPU hours ([KAGGLE.md](KAGGLE.md)).
+   notebook on their own free weekly GPU hours ([KAGGLE.md](KAGGLE.md)). When one looks promising, switch to **focus**
+   to give it both T4s (1.45× faster).
 2. **Quick reward sweeps:** `full_elliptic` (1.4× faster). Check the winners with
    `python -m so_arm_warp.eval_sb3 <model>.zip`, or retrain them on `original_20it`.
 3. **No GPU quota left:** `train_parallel.py` with `SoFetchVecEnv` on a laptop. That's 3× the baseline, exact physics.

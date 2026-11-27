@@ -7,9 +7,10 @@ Wraps the official Kaggle CLI (`pip install kaggle`). See docs/KAGGLE.md for set
     python tools/kaggle_job.py logs so100-carl-rewards            # streams the live log (Ctrl-C to stop)
     python tools/kaggle_job.py download so100-carl-rewards        # -> kaggle_results/so100-carl-rewards/
     python tools/kaggle_job.py submit --name so100-carl-rewards --resume-from so100-carl-rewards ...   # continue training
+    python tools/kaggle_job.py submit --name so100-carl-focus --focus --exp carl-best:default    # one run on both T4s
 
 Each job is a private Kaggle notebook running kaggle_train_warp.ipynb (SB3 PPO on MuJoCo Warp) on GPU T4 x2: up to
-two experiments, one per GPU. The code is cloned from --branch on GitHub, so push your branch (e.g. with a new reward) first.
+two experiments, one per GPU ("variety"), or with --focus one experiment split across both GPUs (~1.45x faster). The code is cloned from --branch on GitHub, so push your branch (e.g. with a new reward) first.
 
 Credentials: ~/.kaggle/kaggle.json, or KAGGLE_USERNAME + KAGGLE_API_TOKEN (or KAGGLE_KEY) in the environment,
 or --env-file path/to/.env containing them. Keys are never printed.
@@ -65,12 +66,14 @@ def current_branch():
         return ""
 
 
-def config_cell(branch, hours, num_envs, experiments, resume):
+def config_cell(branch, hours, num_envs, experiments, resume, mode="variety"):
     exps = ",\n".join(f'    dict(run_name="{r}", reward="{w}", case="{c}")' for r, w, c in experiments)
     res = ", ".join(f'"{k}": "{v}"' for k, v in resume.items())
-    return (f'BRANCH = "{branch}"\nHOURS = {hours}                      # stop each run after this long (Kaggle ends sessions at 12 h)\n'
-            f'NUM_ENVS = {num_envs}                   # parallel envs per GPU\n'
-            f'EXPERIMENTS = [                   # one per GPU\n{exps},\n]\n'
+    return (f'BRANCH = "{branch}"\n'
+            f'MODE = "{mode}"                  # "variety": one experiment per T4 | "focus": one experiment on both T4s\n'
+            f'HOURS = {hours}                      # stop each run after this long (Kaggle ends sessions at 12 h)\n'
+            f'NUM_ENVS = {num_envs}                   # parallel envs per experiment\n'
+            f'EXPERIMENTS = [\n{exps},\n]\n'
             f'RESUME = {{{res}}}                      # run_name -> checkpoint (used if the file exists)')
 
 
@@ -85,8 +88,11 @@ def submit(a):
         if len(parts) not in (2, 3):
             sys.exit(f"--exp {e!r}: use RUN_NAME:REWARD or RUN_NAME:REWARD:CASE")
         experiments.append((parts[0], parts[1], parts[2] if len(parts) == 3 else a.case))
+    if a.focus and len(experiments) != 1:
+        sys.exit("--focus trains one experiment on both T4s: give exactly one --exp")
     if not 1 <= len(experiments) <= 2:
         sys.exit("give one or two --exp (one per T4)")
+    mode = "focus" if a.focus else "variety"
     resume, sources = {}, []
     if a.resume_from:
         src = a.resume_from if "/" in a.resume_from else f"{user}/{a.resume_from}"
@@ -96,7 +102,7 @@ def submit(a):
 
     nb = json.load(open(NOTEBOOK))
     idx = next(i for i, c in enumerate(nb["cells"]) if "EXPERIMENTS = [" in "".join(c["source"]))
-    nb["cells"][idx]["source"] = config_cell(a.branch, a.hours, a.num_envs, experiments, resume)
+    nb["cells"][idx]["source"] = config_cell(a.branch, a.hours, a.num_envs, experiments, resume, mode)
     out = a.dir or tempfile.mkdtemp(prefix="kaggle_job_")
     os.makedirs(out, exist_ok=True)
     json.dump(nb, open(os.path.join(out, f"{slug}.ipynb"), "w"), indent=1)
@@ -104,7 +110,8 @@ def submit(a):
             "kernel_type": "notebook", "is_private": True, "enable_gpu": True, "enable_internet": True,
             "dataset_sources": [], "competition_sources": [], "kernel_sources": sources, "model_sources": []}
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
-    print(f"Job '{user}/{slug}': branch {a.branch}, {a.hours} h, {a.num_envs} envs/GPU")
+    print(f"Job '{user}/{slug}': branch {a.branch}, {a.hours} h, {a.num_envs} envs per experiment, "
+          + ("focus (one experiment on both T4s)" if a.focus else "variety (one experiment per T4)"))
     for r, w, c in experiments:
         print(f"  {r}: reward={w} case={c}" + (f" (resume from {resume[r]})" if r in resume else ""))
     if a.dry_run:
@@ -149,6 +156,7 @@ def main():
     s.add_argument("--branch", default=current_branch() or "main", help="GitHub branch to clone")
     s.add_argument("--hours", type=float, default=11.0)
     s.add_argument("--num-envs", type=int, default=8192)
+    s.add_argument("--focus", action="store_true", help="train one --exp on both T4s (~1.45x faster) instead of one per T4")
     s.add_argument("--resume-from", default=None, help="earlier job name whose results/models/<run>/final.zip to continue")
     s.add_argument("--accelerator", default="NvidiaTeslaT4")
     s.add_argument("--dir", default=None, help="where to write the job folder (default: a temp dir)")
